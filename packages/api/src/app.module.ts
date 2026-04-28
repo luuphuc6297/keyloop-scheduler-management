@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { LoggerModule, type Params } from 'nestjs-pino';
 import { ConfigModule } from './config/config.module';
 import type { AppConfig } from './config/config.schema';
+import { HealthModule } from './modules/health/health.module';
 
 type RequestWithId = IncomingMessage & { id?: string | number };
 
@@ -46,6 +47,7 @@ type RequestWithId = IncomingMessage & { id?: string | number };
         };
       },
     }),
+    HealthModule,
   ],
   controllers: [],
   providers: [],
