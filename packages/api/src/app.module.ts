@@ -1,10 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { LoggerModule, type Params } from 'nestjs-pino';
 import { ConfigModule } from './config/config.module';
 import type { AppConfig } from './config/config.schema';
 import { HealthModule } from './modules/health/health.module';
+import { ObservabilityModule } from './modules/observability/observability.module';
 import { RequestIdMiddleware } from './shared/middleware/request-id.middleware';
 
 type RequestWithId = IncomingMessage & { id?: string | number };
@@ -41,14 +43,25 @@ type RequestWithId = IncomingMessage & { id?: string | number };
               }),
               res: (res: ServerResponse) => ({ status_code: res.statusCode }),
             },
-            ...(isDev
-              ? { transport: { target: 'pino-pretty', options: { singleLine: true } } }
-              : {}),
+            ...(isDev ? { transport: { target: 'pino-pretty', options: { singleLine: true } } } : {}),
           },
         };
       },
     }),
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<AppConfig, true>) => ({
+        type: 'postgres' as const,
+        url: config.get('DATABASE_URL'),
+        entities: [],
+        migrations: [],
+        synchronize: false,
+        logging: config.get('LOG_LEVEL') === 'debug' ? 'all' : ['error', 'warn'],
+        cache: false,
+      }),
+    }),
     HealthModule,
+    ObservabilityModule,
   ],
   controllers: [],
   providers: [],

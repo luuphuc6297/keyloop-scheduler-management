@@ -26,16 +26,12 @@ describe('Request ID (e2e)', () => {
 
   it('honors incoming X-Request-Id when valid ULID', async () => {
     const incoming = '01HQXY1234567890ABCDEFGHJK';
-    const res = await request(app.getHttpServer())
-      .get('/health/liveness')
-      .set('X-Request-Id', incoming);
+    const res = await request(app.getHttpServer()).get('/health/liveness').set('X-Request-Id', incoming);
     expect(res.headers['x-request-id']).toBe(incoming);
   });
 
   it('replaces invalid X-Request-Id with a fresh ULID', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/health/liveness')
-      .set('X-Request-Id', 'not-a-ulid');
+    const res = await request(app.getHttpServer()).get('/health/liveness').set('X-Request-Id', 'not-a-ulid');
     expect(res.headers['x-request-id']).not.toBe('not-a-ulid');
     expect(res.headers['x-request-id']).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
   });

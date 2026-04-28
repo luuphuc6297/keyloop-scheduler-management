@@ -46,9 +46,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const { status, problem } = this.toProblem(exception, instance, requestId);
 
     if (status >= 500) {
-      this.logger.error(
-        `unhandled exception (request_id=${requestId ?? 'n/a'}): ${String(exception)}`,
-      );
+      this.logger.error(`unhandled exception (request_id=${requestId ?? 'n/a'}): ${String(exception)}`);
     }
 
     response.status(status);

@@ -1,9 +1,17 @@
 import { Controller, Get } from '@nestjs/common';
-import { HealthCheck, HealthCheckResult, HealthCheckService } from '@nestjs/terminus';
+import {
+  HealthCheck,
+  type HealthCheckResult,
+  HealthCheckService,
+  TypeOrmHealthIndicator,
+} from '@nestjs/terminus';
 
 @Controller('health')
 export class HealthController {
-  constructor(private readonly health: HealthCheckService) {}
+  constructor(
+    private readonly health: HealthCheckService,
+    private readonly db: TypeOrmHealthIndicator,
+  ) {}
 
   @Get('liveness')
   @HealthCheck()
@@ -14,7 +22,6 @@ export class HealthController {
   @Get('readiness')
   @HealthCheck()
   readiness(): Promise<HealthCheckResult> {
-    // DB indicator added in Task 13 (TypeORM setup)
-    return this.health.check([]);
+    return this.health.check([() => this.db.pingCheck('postgres', { timeout: 1000 })]);
   }
 }

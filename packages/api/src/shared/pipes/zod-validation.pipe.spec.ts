@@ -8,8 +8,8 @@ const meta: ArgumentMetadata = { type: 'body' };
 describe('ZodValidationPipe', () => {
   it('returns parsed value on valid input', () => {
     const pipe = new ZodValidationPipe(schema);
-    const out = pipe.transform({ email: 'a@b.c', age: 5 }, meta);
-    expect(out).toEqual({ email: 'a@b.c', age: 5 });
+    const out = pipe.transform({ email: 'a@example.com', age: 5 }, meta);
+    expect(out).toEqual({ email: 'a@example.com', age: 5 });
   });
 
   it('throws BadRequestException with details on invalid input', () => {
@@ -28,7 +28,7 @@ describe('ZodValidationPipe', () => {
 
   it('rejects extra fields with .strict() schema', () => {
     const pipe = new ZodValidationPipe(schema);
-    expect(() => pipe.transform({ email: 'a@b.c', age: 5, extra: 1 }, meta)).toThrow(
+    expect(() => pipe.transform({ email: 'a@example.com', age: 5, extra: 1 }, meta)).toThrow(
       BadRequestException,
     );
   });

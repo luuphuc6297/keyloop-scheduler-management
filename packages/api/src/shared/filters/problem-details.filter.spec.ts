@@ -46,10 +46,7 @@ describe('ProblemDetailsFilter', () => {
 
   it('shapes a ConflictException with conflictingResource extras', () => {
     const host = makeHost();
-    filter.catch(
-      new ConflictException({ code: 'BAY_UNAVAILABLE', conflictingResource: 'bay' }),
-      host,
-    );
+    filter.catch(new ConflictException({ code: 'BAY_UNAVAILABLE', conflictingResource: 'bay' }), host);
 
     const body = host.__response.json.mock.calls[0][0];
     expect(body.status).toBe(409);
