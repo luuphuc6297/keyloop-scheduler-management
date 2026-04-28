@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+out/
+coverage/
+*.log
+.DS_Store
+.env
+.env.local
+.env.*.local
+*.tsbuildinfo
+.pnpm-store/
+.idea/
+.vscode/
+!.vscode/extensions.json
+.turbo/
