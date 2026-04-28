@@ -1,10 +1,15 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LoggerModule, type Params } from 'nestjs-pino';
 import { ConfigModule } from './config/config.module';
 import type { AppConfig } from './config/config.schema';
+import { AuthModule } from './modules/auth/auth.module';
+import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { HealthModule } from './modules/health/health.module';
 import { ObservabilityModule } from './modules/observability/observability.module';
 import { RequestIdMiddleware } from './shared/middleware/request-id.middleware';
@@ -53,18 +58,27 @@ type RequestWithId = IncomingMessage & { id?: string | number };
       useFactory: (config: ConfigService<AppConfig, true>) => ({
         type: 'postgres' as const,
         url: config.get('DATABASE_URL'),
-        entities: [],
+        autoLoadEntities: true,
         migrations: [],
         synchronize: false,
         logging: config.get('LOG_LEVEL') === 'debug' ? 'all' : ['error', 'warn'],
         cache: false,
       }),
     }),
+    ThrottlerModule.forRoot([
+      { name: 'short', ttl: 1_000, limit: 20 },
+      { name: 'medium', ttl: 60_000, limit: 100 },
+    ]),
+    AuthModule,
     HealthModule,
     ObservabilityModule,
   ],
   controllers: [],
-  providers: [],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
