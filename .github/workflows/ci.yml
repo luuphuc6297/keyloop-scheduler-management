@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  api:
+    name: API — lint, typecheck, test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: scheduler_owner
+          POSTGRES_PASSWORD: owner
+          POSTGRES_DB: scheduler
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U scheduler_owner -d scheduler"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - name: Initialize Postgres extensions and roles
+        run: |
+          PGPASSWORD=owner psql -h localhost -U scheduler_owner -d scheduler -f packages/api/db/init/01-extensions.sql
+          PGPASSWORD=owner psql -h localhost -U scheduler_owner -d scheduler -f packages/api/db/init/02-roles.sql
+      - run: pnpm --filter @keyloop/api lint
+      - run: pnpm --filter @keyloop/api typecheck
+      - run: pnpm --filter @keyloop/api test:unit
+      - run: pnpm --filter @keyloop/api test:int
+      - run: pnpm --filter @keyloop/api test:e2e
+      - run: pnpm --filter @keyloop/api build
+
+  web:
+    name: Web — lint, typecheck, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @keyloop/web lint
+      - run: pnpm --filter @keyloop/web typecheck
+      - run: pnpm --filter @keyloop/web build
