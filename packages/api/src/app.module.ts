@@ -1,10 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { Module } from '@nestjs/common';
+import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LoggerModule, type Params } from 'nestjs-pino';
 import { ConfigModule } from './config/config.module';
 import type { AppConfig } from './config/config.schema';
 import { HealthModule } from './modules/health/health.module';
+import { RequestIdMiddleware } from './shared/middleware/request-id.middleware';
 
 type RequestWithId = IncomingMessage & { id?: string | number };
 
@@ -52,4 +53,8 @@ type RequestWithId = IncomingMessage & { id?: string | number };
   controllers: [],
   providers: [],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}
