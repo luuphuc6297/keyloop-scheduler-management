@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import type { AppConfig } from './config/config.schema';
+import { ProblemDetailsFilter } from './shared/filters/problem-details.filter';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -39,6 +40,8 @@ async function bootstrap(): Promise<void> {
     exposedHeaders: ['ETag', 'X-Request-Id', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
     maxAge: 86_400,
   });
+
+  app.useGlobalFilters(new ProblemDetailsFilter());
 
   const port = config.get('PORT');
   await app.listen(port);
