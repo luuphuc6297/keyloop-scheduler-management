@@ -11,7 +11,11 @@
     "test": "jest --config jest.config.ts",
     "test:unit": "jest --config jest.unit.config.ts",
     "test:int": "jest --config jest.int.config.ts --runInBand",
-    "test:e2e": "jest --config jest.e2e.config.ts --runInBand"
+    "test:e2e": "jest --config jest.e2e.config.ts --runInBand",
+    "migration:run": "ts-node -P tsconfig.json --require tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d src/data-source.ts",
+    "migration:revert": "ts-node -P tsconfig.json --require tsconfig-paths/register ./node_modules/typeorm/cli.js migration:revert -d src/data-source.ts",
+    "migration:generate": "ts-node -P tsconfig.json --require tsconfig-paths/register ./node_modules/typeorm/cli.js migration:generate -d src/data-source.ts",
+    "seed:dev": "ts-node -P tsconfig.json --require tsconfig-paths/register src/seeds/dev-seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.1",
@@ -53,6 +57,7 @@
     "@types/supertest": "^6.0.2",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
+    "dotenv": "^16.4.5",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
