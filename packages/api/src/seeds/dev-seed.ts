@@ -1,5 +1,8 @@
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
+import * as path from 'node:path';
 import { DataSource } from 'typeorm';
+
+dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
 /**
  * Dev seed — populate minimal fixtures for local development and demos.
