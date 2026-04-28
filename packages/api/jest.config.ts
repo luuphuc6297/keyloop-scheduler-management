@@ -11,6 +11,7 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   testRegex: '\\.(spec|test|int-spec|e2e-spec)\\.ts$',
   transform: { '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }] },
+  setupFiles: ['<rootDir>/test/setup.ts'],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.module.ts',
