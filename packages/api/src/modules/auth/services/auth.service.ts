@@ -6,6 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
 import { IsNull, LessThan, MoreThan, Repository } from 'typeorm';
 import type { AppConfig } from '../../../config/config.schema';
+import { MetricsService } from '../../observability/metrics.service';
 import type { LoginDto } from '../dtos/login.schema';
 import { AppUser } from '../entities/app-user.entity';
 import { FailedLoginAttempt } from '../entities/failed-login-attempt.entity';
@@ -34,12 +35,14 @@ export class AuthService {
     private readonly failedLogins: Repository<FailedLoginAttempt>,
     private readonly jwt: JwtService,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly metrics: MetricsService,
   ) {}
 
   async login(dto: LoginDto, meta: ClientMeta): Promise<TokenPair> {
     const user = await this.users.findOne({ where: { email: dto.email } });
 
     if (user?.lockedUntil && user.lockedUntil > new Date()) {
+      this.metrics.authLoginAttemptsTotal.labels({ outcome: 'locked' }).inc();
       throw new HttpException(
         { code: 'ACCOUNT_LOCKED', message: 'Account locked', lockedUntil: user.lockedUntil.toISOString() },
         423, // HTTP 423 Locked
@@ -55,13 +58,16 @@ export class AuthService {
         if (recent >= LOCKOUT_THRESHOLD) {
           const until = new Date(Date.now() + LOCKOUT_DURATION_MINUTES * 60_000);
           await this.users.update(user.id, { lockedUntil: until });
+          this.metrics.accountsLockedTotal.inc();
           this.logger.warn(`Account locked: ${dto.email} until ${until.toISOString()}`);
         }
       }
+      this.metrics.authLoginAttemptsTotal.labels({ outcome: 'invalid_credentials' }).inc();
       throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
     }
 
     await this.users.update(user.id, { failedLoginCount: 0, lockedUntil: null });
+    this.metrics.authLoginAttemptsTotal.labels({ outcome: 'success' }).inc();
     return this.issueTokenPair(user, meta);
   }
 
@@ -71,6 +77,7 @@ export class AuthService {
 
     if (stored?.revokedAt) {
       await this.refreshTokens.update({ familyId: stored.familyId }, { revokedAt: new Date() });
+      this.metrics.authRefreshTokenReuseTotal.inc();
       this.logger.warn(`Refresh token reuse detected for family ${stored.familyId}, user ${stored.userId}`);
       throw new UnauthorizedException({ code: 'TOKEN_REVOKED', message: 'Token revoked' });
     }

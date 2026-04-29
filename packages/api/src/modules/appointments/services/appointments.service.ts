@@ -8,8 +8,20 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
+import { applyRlsContext } from '../../../shared/db/rls-context';
 import { MetricsService } from '../../observability/metrics.service';
-import { computeTimeRange, InvalidLocalTimeError } from '../domain/compute-time-range';
+import {
+  computeTimeRange,
+  InvalidLocalTimeError,
+  type ComputedTimeRange,
+} from '../domain/compute-time-range';
+import {
+  BookingValidationError,
+  validateBusinessHours,
+  validateRangeDoesNotCrossUnsafeDstTransition,
+  validateSkillMatch,
+  validateTechnicianAvailability,
+} from '../domain/validators';
 import type { AppointmentResponse, BookAppointmentDto } from '../dtos/book-appointment.schema';
 import {
   decodeCursor,
@@ -27,6 +39,7 @@ interface ServiceTypeRow {
   id: string;
   duration_minutes: number;
   buffer_minutes: number;
+  required_skill_id: string | null;
 }
 
 interface DealershipRow {
@@ -77,12 +90,30 @@ export class AppointmentsService {
   // ===== CREATE =====
 
   async book(dto: BookAppointmentDto, ctx: BookContext): Promise<AppointmentResponse> {
+    const stop = this.metrics.bookingDuration.startTimer();
+    try {
+      return await this.bookInner(dto, ctx);
+    } finally {
+      stop();
+    }
+  }
+
+  private async bookInner(dto: BookAppointmentDto, ctx: BookContext): Promise<AppointmentResponse> {
     return this.ds.transaction(async (manager) => {
       await this.setRlsContext(manager, ctx);
 
       const dealership = await this.loadDealership(manager, ctx.dealershipId);
       const service = await this.loadServiceType(manager, dto.service_type_id);
-      const timeRange = this.buildTimeRange(dto.start_at, service, dealership.timezone);
+      const range = this.buildTimeRange(dto.start_at, service, dealership.timezone);
+
+      await this.runBookingValidators(
+        manager,
+        range,
+        ctx.dealershipId,
+        dealership.timezone,
+        dto.technician_id,
+        service.required_skill_id,
+      );
 
       try {
         const inserted = (await manager.query(
@@ -98,7 +129,7 @@ export class AppointmentsService {
             dto.service_type_id,
             dto.technician_id,
             dto.bay_id,
-            timeRange,
+            range.literal,
             ctx.userId,
           ],
         )) as AppointmentRow[];
@@ -255,11 +286,15 @@ export class AppointmentsService {
       const sets: string[] = [];
       const params: unknown[] = [];
 
+      // Resolve effective values after the patch
+      const effectiveTechnicianId = dto.technician_id ?? current.technician_id;
+      const dealership = await this.loadDealership(manager, ctx.dealershipId);
+      const service = await this.loadServiceType(manager, current.service_type_id);
+      let effectiveRange: ComputedTimeRange | null = null;
+
       if (dto.start_at !== undefined) {
-        const dealership = await this.loadDealership(manager, ctx.dealershipId);
-        const service = await this.loadServiceType(manager, current.service_type_id);
-        const timeRange = this.buildTimeRange(dto.start_at, service, dealership.timezone);
-        params.push(timeRange);
+        effectiveRange = this.buildTimeRange(dto.start_at, service, dealership.timezone);
+        params.push(effectiveRange.literal);
         sets.push(`time_range = $${params.length}::tstzrange`);
       }
       if (dto.technician_id !== undefined) {
@@ -269,6 +304,35 @@ export class AppointmentsService {
       if (dto.bay_id !== undefined) {
         params.push(dto.bay_id);
         sets.push(`bay_id = $${params.length}`);
+      }
+
+      // If start changed OR technician changed, re-run validators against the
+      // effective values. We only have a fresh `effectiveRange` for start_at
+      // changes; for technician-only changes the existing time_range still
+      // applies, so we parse it and validate the technician's shift/skill.
+      if (dto.start_at !== undefined || dto.technician_id !== undefined) {
+        const validateRange =
+          effectiveRange ??
+          (() => {
+            // current.time_range is `["2026-...","2026-...")` or with spaces — extract bounds
+            const match = current.time_range.match(/^[\[\(]"?([^",\]\)]+)"?,"?([^",\]\)]+)"?[\]\)]$/);
+            if (!match) {
+              throw new Error(`could not parse current time_range: ${current.time_range}`);
+            }
+            return {
+              literal: current.time_range,
+              startAtIso: new Date(match[1]!.replace(' ', 'T')).toISOString(),
+              endAtIso: new Date(match[2]!.replace(' ', 'T')).toISOString(),
+            } satisfies ComputedTimeRange;
+          })();
+        await this.runBookingValidators(
+          manager,
+          validateRange,
+          ctx.dealershipId,
+          dealership.timezone,
+          effectiveTechnicianId,
+          service.required_skill_id,
+        );
       }
 
       params.push(id);
@@ -287,6 +351,7 @@ export class AppointmentsService {
         )) as AppointmentRow[];
 
         if (result.length === 0) {
+          this.metrics.optimisticLockFailuresTotal.inc();
           throw new PreconditionFailedException({
             code: 'PRECONDITION_FAILED',
             message: 'Appointment was modified; refresh and retry',
@@ -337,6 +402,7 @@ export class AppointmentsService {
         )) as AppointmentRow[];
 
         if (result.length === 0) {
+          this.metrics.optimisticLockFailuresTotal.inc();
           throw new PreconditionFailedException({
             code: 'PRECONDITION_FAILED',
             message: 'Appointment was modified; refresh and retry',
@@ -359,6 +425,9 @@ export class AppointmentsService {
       );
       await this.publishOutbox(manager, updated, ctx, 'appointment.cancelled');
 
+      this.metrics.appointmentsStatusTransitionTotal
+        .labels({ from: current.status, to: updated.status })
+        .inc();
       this.logger.log(`appointment.cancelled id=${id}`);
       return toResponse(updated);
     });
@@ -367,8 +436,7 @@ export class AppointmentsService {
   // ===== HELPERS =====
 
   private async setRlsContext(manager: EntityManager, ctx: BookContext): Promise<void> {
-    await manager.query(`SELECT set_config('app.current_dealership', $1, true)`, [ctx.dealershipId]);
-    await manager.query(`SELECT set_config('app.current_user_id', $1, true)`, [ctx.userId]);
+    await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
   }
 
   private async loadDealership(manager: EntityManager, id: string): Promise<DealershipRow> {
@@ -383,7 +451,7 @@ export class AppointmentsService {
 
   private async loadServiceType(manager: EntityManager, id: string): Promise<ServiceTypeRow> {
     const rows = (await manager.query(
-      `SELECT id, duration_minutes, buffer_minutes FROM service_type WHERE id = $1`,
+      `SELECT id, duration_minutes, buffer_minutes, required_skill_id FROM service_type WHERE id = $1`,
       [id],
     )) as ServiceTypeRow[];
     if (rows.length === 0) {
@@ -400,7 +468,11 @@ export class AppointmentsService {
     return rows[0]!;
   }
 
-  private buildTimeRange(startAt: string, service: ServiceTypeRow, timezone: string): string {
+  private buildTimeRange(
+    startAt: string,
+    service: ServiceTypeRow,
+    timezone: string,
+  ): ComputedTimeRange {
     try {
       return computeTimeRange({
         startAt,
@@ -410,7 +482,40 @@ export class AppointmentsService {
       });
     } catch (err) {
       if (err instanceof InvalidLocalTimeError) {
+        this.metrics.dstValidationFailuresTotal.inc();
         throw new ConflictException({ code: 'INVALID_LOCAL_TIME', message: err.message });
+      }
+      throw err;
+    }
+  }
+
+  private async runBookingValidators(
+    manager: EntityManager,
+    range: ComputedTimeRange,
+    dealershipId: string,
+    timezone: string,
+    technicianId: string,
+    requiredSkillId: string | null,
+  ): Promise<void> {
+    const ctx = {
+      manager,
+      dealershipId,
+      timezone,
+      startAtIso: range.startAtIso,
+      endAtIso: range.endAtIso,
+    };
+    try {
+      // 1. DST cross-safety (in-memory walk)
+      validateRangeDoesNotCrossUnsafeDstTransition(range.startAtIso, range.endAtIso, timezone);
+      // 2. Skill match (one query, fast)
+      await validateSkillMatch(ctx, technicianId, requiredSkillId);
+      // 3. Business hours / closed exception
+      await validateBusinessHours(ctx);
+      // 4. Technician shift / time-off
+      await validateTechnicianAvailability(ctx, technicianId);
+    } catch (err) {
+      if (err instanceof BookingValidationError) {
+        throw new ConflictException({ code: err.code, message: err.message, ...err.extra });
       }
       throw err;
     }

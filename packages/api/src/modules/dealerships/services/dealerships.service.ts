@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
+import { applyRlsContext } from '../../../shared/db/rls-context';
 
 interface CatalogContext {
   userId: string;
@@ -176,8 +177,7 @@ export class DealershipsService {
   }
 
   private async setRlsContext(manager: EntityManager, ctx: CatalogContext): Promise<void> {
-    await manager.query(`SELECT set_config('app.current_dealership', $1, true)`, [ctx.dealershipId]);
-    await manager.query(`SELECT set_config('app.current_user_id', $1, true)`, [ctx.userId]);
+    await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
   }
 }
 

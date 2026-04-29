@@ -10,9 +10,11 @@ describe('computeTimeRange', () => {
       bufferMinutes: 0,
       timezone: tz,
     });
-    expect(range).toMatch(/^\[.*,.*\)$/);
-    expect(range).toContain('2026-05-01T17:00:00.000Z');
-    expect(range).toContain('2026-05-01T17:30:00.000Z');
+    expect(range.literal).toMatch(/^\[.*,.*\)$/);
+    expect(range.literal).toContain('2026-05-01T17:00:00.000Z');
+    expect(range.literal).toContain('2026-05-01T17:30:00.000Z');
+    expect(range.startAtIso).toBe('2026-05-01T17:00:00.000Z');
+    expect(range.endAtIso).toBe('2026-05-01T17:30:00.000Z');
   });
 
   it('includes buffer in upper bound', () => {
@@ -22,7 +24,8 @@ describe('computeTimeRange', () => {
       bufferMinutes: 10,
       timezone: tz,
     });
-    expect(range).toContain('2026-05-01T17:40:00.000Z');
+    expect(range.literal).toContain('2026-05-01T17:40:00.000Z');
+    expect(range.endAtIso).toBe('2026-05-01T17:40:00.000Z');
   });
 
   it('rejects non-existent local time during DST spring-forward', () => {
@@ -77,7 +80,7 @@ describe('computeTimeRange', () => {
       bufferMinutes: 0,
       timezone: 'America/Los_Angeles',
     });
-    expect(range).toContain('2026-05-01T20:00:00.000Z');
-    expect(range).toContain('2026-05-01T21:00:00.000Z');
+    expect(range.literal).toContain('2026-05-01T20:00:00.000Z');
+    expect(range.literal).toContain('2026-05-01T21:00:00.000Z');
   });
 });

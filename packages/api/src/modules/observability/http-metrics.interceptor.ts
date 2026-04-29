@@ -34,6 +34,9 @@ export class HttpMetricsInterceptor implements NestInterceptor {
         .labels({ method, route, status: String(status) })
         .observe(duration);
       this.metrics.httpRequestsTotal.labels({ method, route, status: String(status) }).inc();
+      if (status === 429) {
+        this.metrics.rateLimitExceededTotal.labels({ route }).inc();
+      }
     };
 
     return next.handle().pipe(

@@ -16,6 +16,7 @@ import { DealershipsModule } from './modules/dealerships/dealerships.module';
 import { HealthModule } from './modules/health/health.module';
 import { HttpMetricsInterceptor } from './modules/observability/http-metrics.interceptor';
 import { ObservabilityModule } from './modules/observability/observability.module';
+import { OutboxModule } from './modules/outbox/outbox.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { RequestIdMiddleware } from './shared/middleware/request-id.middleware';
 
@@ -71,8 +72,16 @@ type RequestWithId = IncomingMessage & { id?: string | number };
       }),
     }),
     ThrottlerModule.forRoot([
+      // Default tiers — apply to every route unless overridden
       { name: 'short', ttl: 1_000, limit: 20 },
       { name: 'medium', ttl: 60_000, limit: 100 },
+      // Tighter named tiers — opt-in via @Throttle({ <name>: ... }) on specific endpoints.
+      // (Per-endpoint overrides are wired in the controllers; see also the
+      // RateLimitInterceptor which records 429 responses to the
+      // rate_limit_exceeded_total counter.)
+      { name: 'login', ttl: 15 * 60_000, limit: 5 }, // /auth/login: 5 / 15 min
+      { name: 'refresh', ttl: 5 * 60_000, limit: 10 }, // /auth/refresh: 10 / 5 min
+      { name: 'book', ttl: 60_000, limit: 30 }, // POST /appointments: 30 / min
     ]),
     AuthModule,
     AppointmentsModule,
@@ -80,6 +89,7 @@ type RequestWithId = IncomingMessage & { id?: string | number };
     DealershipsModule,
     HealthModule,
     ObservabilityModule,
+    OutboxModule,
     VehiclesModule,
   ],
   controllers: [],

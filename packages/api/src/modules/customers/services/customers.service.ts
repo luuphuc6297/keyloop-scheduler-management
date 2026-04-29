@@ -1,6 +1,8 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
+import { applyRlsContext } from '../../../shared/db/rls-context';
+import { MetricsService } from '../../observability/metrics.service';
 import type {
   CustomerExportResponse,
   CustomerResponse,
@@ -26,7 +28,10 @@ interface CustomerRow {
 export class CustomersService {
   private readonly logger = new Logger(CustomersService.name);
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly metrics: MetricsService,
+  ) {}
 
   async search(query: SearchCustomersQuery, ctx: CustomerContext): Promise<CustomerResponse[]> {
     return this.ds.transaction(async (manager) => {
@@ -97,6 +102,7 @@ export class CustomersService {
         [ctx.dealershipId, id, JSON.stringify({ id, reason, requested_by: ctx.userId })],
       );
 
+      this.metrics.gdprAnonymizationTotal.inc();
       this.logger.log(`customer.anonymized id=${id} dealership=${ctx.dealershipId}`);
       return toResponse(updated[0]!);
     });
@@ -152,8 +158,7 @@ export class CustomersService {
   }
 
   private async setRlsContext(manager: EntityManager, ctx: CustomerContext): Promise<void> {
-    await manager.query(`SELECT set_config('app.current_dealership', $1, true)`, [ctx.dealershipId]);
-    await manager.query(`SELECT set_config('app.current_user_id', $1, true)`, [ctx.userId]);
+    await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
   }
 
   private async loadCustomer(manager: EntityManager, id: string): Promise<CustomerRow> {

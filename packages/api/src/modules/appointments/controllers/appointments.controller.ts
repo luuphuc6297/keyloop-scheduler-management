@@ -13,6 +13,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -53,6 +54,9 @@ export class AppointmentsController {
 
   @Post()
   @Roles('service_advisor', 'manager')
+  // 30 bookings per minute per IP — preserves DB throughput for non-abusive
+  // bursts; combined with idempotency means accidental retries are safe.
+  @Throttle({ book: { ttl: 60_000, limit: 30 } })
   async book(
     @Body(new ZodValidationPipe(BookAppointmentSchema)) dto: BookAppointmentDto,
     @CurrentUser() user: AuthContext,

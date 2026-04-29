@@ -97,9 +97,11 @@ describe('Booking (e2e)', () => {
     )) as Array<{ id: string }>;
 
     // Pick a seeded service_type, technician, bay (from dev seed)
-    const [serviceType] = (await ds.query(`SELECT id FROM service_type WHERE dealership_id = $1 LIMIT 1`, [
-      dealershipId,
-    ])) as Array<{ id: string }>;
+    // Pin to Oil Change so any technician qualifies for the skill-match validator
+    const [serviceType] = (await ds.query(
+      `SELECT id FROM service_type WHERE dealership_id = $1 AND name = 'Oil Change' LIMIT 1`,
+      [dealershipId],
+    )) as Array<{ id: string }>;
     const [technician] = (await ds.query(`SELECT id FROM technician WHERE dealership_id = $1 LIMIT 1`, [
       dealershipId,
     ])) as Array<{ id: string }>;
@@ -204,14 +206,14 @@ describe('Booking (e2e)', () => {
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${accessToken}`)
       .set('Idempotency-Key', ulid())
-      .send(payload('2026-06-01T17:00:00-04:00'));
+      .send(payload('2026-06-01T13:00:00-04:00'));
     expect(r1.status).toBe(201);
 
     const r2 = await request(app.getHttpServer())
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${accessToken}`)
       .set('Idempotency-Key', ulid())
-      .send(payload('2026-06-01T17:15:00-04:00')); // overlaps r1 (30 min duration)
+      .send(payload('2026-06-01T13:15:00-04:00')); // overlaps r1 (30 min duration)
 
     expect(r2.status).toBe(409);
     expect(['BAY_UNAVAILABLE', 'TECHNICIAN_UNAVAILABLE']).toContain(r2.body.code);

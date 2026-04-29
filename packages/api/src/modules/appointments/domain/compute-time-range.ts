@@ -23,15 +23,27 @@ export interface ComputeTimeRangeParams {
   timezone: string;
 }
 
+export interface ComputedTimeRange {
+  /** Postgres tstzrange literal `[lower,upper)`. */
+  literal: string;
+  /** Lower bound as UTC ISO 8601 string. */
+  startAtIso: string;
+  /** Upper bound as UTC ISO 8601 string (start + duration + buffer). */
+  endAtIso: string;
+}
+
 /**
- * Compute a Postgres `tstzrange` literal `[<lower>,<upper>)` for an appointment.
+ * Compute a Postgres `tstzrange` literal `[<lower>,<upper>)` for an appointment,
+ * plus the resolved start/end UTC ISO strings (so callers can run additional
+ * validation without re-parsing the literal).
+ *
  * Uses Luxon to validate against DST transitions:
  *   - Spring-forward non-existent times are rejected.
  *   - Fall-back ambiguous times resolve to the earlier UTC offset (Luxon default).
  *
  * Reference: design doc Section 8.
  */
-export function computeTimeRange(params: ComputeTimeRangeParams): string {
+export function computeTimeRange(params: ComputeTimeRangeParams): ComputedTimeRange {
   const { startAt, durationMinutes, bufferMinutes, timezone } = params;
 
   if (durationMinutes <= 0) {
@@ -88,6 +100,12 @@ export function computeTimeRange(params: ComputeTimeRangeParams): string {
 
   const end = inDealershipTz.plus({ minutes: durationMinutes + bufferMinutes });
 
+  const startAtIso = inDealershipTz.toUTC().toISO()!;
+  const endAtIso = end.toUTC().toISO()!;
   // Postgres tstzrange literal: half-open [lower, upper).
-  return `[${inDealershipTz.toUTC().toISO()},${end.toUTC().toISO()})`;
+  return {
+    literal: `[${startAtIso},${endAtIso})`,
+    startAtIso,
+    endAtIso,
+  };
 }

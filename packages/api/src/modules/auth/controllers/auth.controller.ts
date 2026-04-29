@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Headers, Ip, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe';
 import { CurrentUser } from '../decorators/current-user.decorator';
 import { Public } from '../decorators/public.decorator';
@@ -19,6 +20,8 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  // 5 attempts per IP per 15 min — credential stuffing defense (spec §7.7)
+  @Throttle({ login: { ttl: 15 * 60_000, limit: 5 } })
   async login(
     @Body(new ZodValidationPipe(LoginSchema)) dto: LoginDto,
     @Headers('user-agent') userAgent: string | undefined,
@@ -30,6 +33,8 @@ export class AuthController {
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  // 10 attempts per IP per 5 min — token-replay/abuse defense
+  @Throttle({ refresh: { ttl: 5 * 60_000, limit: 10 } })
   async refresh(
     @Body(new ZodValidationPipe(RefreshSchema)) dto: RefreshDto,
     @Headers('user-agent') userAgent: string | undefined,

@@ -115,9 +115,11 @@ describe('Booking lifecycle (e2e)', () => {
       [dealershipId, customer!.id],
     )) as Array<{ id: string }>;
 
-    const [serviceType] = (await ds.query(`SELECT id FROM service_type WHERE dealership_id = $1 LIMIT 1`, [
-      dealershipId,
-    ])) as Array<{ id: string }>;
+    // Pin to Oil Change so both techs qualify for the skill-match validator
+    const [serviceType] = (await ds.query(
+      `SELECT id FROM service_type WHERE dealership_id = $1 AND name = 'Oil Change' LIMIT 1`,
+      [dealershipId],
+    )) as Array<{ id: string }>;
     const technicians = (await ds.query(
       `SELECT id FROM technician WHERE dealership_id = $1 ORDER BY id ASC LIMIT 2`,
       [dealershipId],
@@ -288,7 +290,7 @@ describe('Booking lifecycle (e2e)', () => {
 
   describe('DELETE /appointments/:id (cancel)', () => {
     it('cancels and bumps version', async () => {
-      const created = await book('2026-07-04T09:00:00-04:00');
+      const created = await book('2026-07-08T09:00:00-04:00');
       const res = await request(app.getHttpServer())
         .delete(`/api/v1/appointments/${created.id}`)
         .set('Authorization', `Bearer ${accessToken}`)
@@ -299,7 +301,7 @@ describe('Booking lifecycle (e2e)', () => {
     });
 
     it('rejects double-cancel via FSM', async () => {
-      const created = await book('2026-07-04T10:00:00-04:00');
+      const created = await book('2026-07-08T10:00:00-04:00');
       const cancelled = await request(app.getHttpServer())
         .delete(`/api/v1/appointments/${created.id}`)
         .set('Authorization', `Bearer ${accessToken}`)
@@ -315,7 +317,7 @@ describe('Booking lifecycle (e2e)', () => {
     });
 
     it('frees the slot for re-booking after cancel', async () => {
-      const start = '2026-07-04T11:00:00-04:00';
+      const start = '2026-07-08T11:00:00-04:00';
       const created = await book(start);
       await request(app.getHttpServer())
         .delete(`/api/v1/appointments/${created.id}`)
@@ -342,12 +344,12 @@ describe('Booking lifecycle (e2e)', () => {
 
   describe('GET /appointments/:id/history', () => {
     it('returns audit trail in chronological order', async () => {
-      const created = await book('2026-07-05T09:00:00-04:00');
+      const created = await book('2026-07-09T09:00:00-04:00');
       await request(app.getHttpServer())
         .patch(`/api/v1/appointments/${created.id}`)
         .set('Authorization', `Bearer ${accessToken}`)
         .set('If-Match', `"${created.version}"`)
-        .send({ start_at: '2026-07-05T10:00:00-04:00' })
+        .send({ start_at: '2026-07-09T10:00:00-04:00' })
         .expect(200);
       const res = await request(app.getHttpServer())
         .get(`/api/v1/appointments/${created.id}/history`)
@@ -361,7 +363,7 @@ describe('Booking lifecycle (e2e)', () => {
 
   describe('GET /appointments/availability', () => {
     it('returns slots, excluding times overlapped by confirmed bookings', async () => {
-      const start = '2026-07-06T09:00:00-04:00';
+      const start = '2026-07-13T09:00:00-04:00';
       const created = await book(start, { technician_id: fx.altTechnicianId });
 
       const res = await request(app.getHttpServer())
