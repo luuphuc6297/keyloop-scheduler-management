@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
+import { MetricsService } from '../../observability/metrics.service';
 import { computeTimeRange, InvalidLocalTimeError } from '../domain/compute-time-range';
 import type { AppointmentResponse, BookAppointmentDto } from '../dtos/book-appointment.schema';
 import {
@@ -68,7 +69,10 @@ export interface AppointmentHistoryRow {
 export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly metrics: MetricsService,
+  ) {}
 
   // ===== CREATE =====
 
@@ -105,6 +109,7 @@ export class AppointmentsService {
         await this.recordHistory(manager, row, ctx, 'created', null, toResponse(row));
         await this.publishOutbox(manager, row, ctx, 'appointment.confirmed');
 
+        this.metrics.appointmentsCreatedTotal.labels({ dealership_id: ctx.dealershipId }).inc();
         this.logger.log(`appointment.booked id=${row.id} dealership=${ctx.dealershipId}`);
         return toResponse(row);
       } catch (err) {
@@ -453,6 +458,7 @@ export class AppointmentsService {
     const driver = err.driverError as { code?: string; constraint?: string; detail?: string };
     if (driver.code === '23P01') {
       if (driver.constraint === 'appt_bay_no_overlap') {
+        this.metrics.bookingsConflictTotal.labels({ resource: 'bay' }).inc();
         return new ConflictException({
           code: 'BAY_UNAVAILABLE',
           message: 'The requested bay is already booked for this time slot',
@@ -460,12 +466,14 @@ export class AppointmentsService {
         });
       }
       if (driver.constraint === 'appt_technician_no_overlap') {
+        this.metrics.bookingsConflictTotal.labels({ resource: 'technician' }).inc();
         return new ConflictException({
           code: 'TECHNICIAN_UNAVAILABLE',
           message: 'The technician is not available for this time slot',
           conflictingResource: 'technician',
         });
       }
+      this.metrics.bookingsConflictTotal.labels({ resource: 'unknown' }).inc();
       return new ConflictException({ code: 'BOOKING_CONFLICT' });
     }
     if (driver.code === '23514') {

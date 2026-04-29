@@ -2,11 +2,15 @@ import { createHash } from 'node:crypto';
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThan, Repository } from 'typeorm';
+import { MetricsService } from '../../observability/metrics.service';
 import { IdempotencyRecord } from '../entities/idempotency-record.entity';
 
 @Injectable()
 export class IdempotencyService {
-  constructor(@InjectRepository(IdempotencyRecord) private readonly repo: Repository<IdempotencyRecord>) {}
+  constructor(
+    @InjectRepository(IdempotencyRecord) private readonly repo: Repository<IdempotencyRecord>,
+    private readonly metrics: MetricsService,
+  ) {}
 
   /**
    * Look up a non-expired record for `key + userId`. If found and `requestHash`
@@ -21,13 +25,18 @@ export class IdempotencyService {
     const record = await this.repo.findOne({
       where: { key, userId, expiresAt: MoreThan(new Date()) },
     });
-    if (!record) return null;
+    if (!record) {
+      this.metrics.idempotencyCacheTotal.labels({ result: 'miss' }).inc();
+      return null;
+    }
     if (record.requestHash !== requestHash) {
+      this.metrics.idempotencyCacheTotal.labels({ result: 'conflict' }).inc();
       throw new ConflictException({
         code: 'IDEMPOTENCY_KEY_CONFLICT',
         message: 'Same Idempotency-Key used with a different request body',
       });
     }
+    this.metrics.idempotencyCacheTotal.labels({ result: 'hit' }).inc();
     return { status: record.responseStatus, body: record.responseBody };
   }
 

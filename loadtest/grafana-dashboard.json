@@ -1,0 +1,212 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "SLO Overview",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Read p99 (200ms target)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{method=\"GET\"}[5m])) by (le)) * 1000",
+          "refId": "A",
+          "legendFormat": "p99 ms"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 150 },
+              { "color": "red", "value": 200 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center" }
+    },
+    {
+      "type": "stat",
+      "title": "Write p99 (500ms target)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{method=~\"POST|PATCH|DELETE\"}[5m])) by (le)) * 1000",
+          "refId": "A",
+          "legendFormat": "p99 ms"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 350 },
+              { "color": "red", "value": 500 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center" }
+    },
+    {
+      "type": "stat",
+      "title": "5xx error rate (0.1% target)",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+          "refId": "A",
+          "legendFormat": "rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.0005 },
+              { "color": "red", "value": 0.001 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center" }
+    },
+    {
+      "type": "stat",
+      "title": "Bookings/sec",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(appointments_created_total[1m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "options": { "graphMode": "area", "justifyMode": "center" }
+    },
+    {
+      "type": "row",
+      "title": "Latency Histograms",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP request duration (p50 / p95 / p99) by method",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "id": 5,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[1m])) by (le, method)) * 1000",
+          "refId": "A",
+          "legendFormat": "p50 {{method}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le, method)) * 1000",
+          "refId": "B",
+          "legendFormat": "p95 {{method}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[1m])) by (le, method)) * 1000",
+          "refId": "C",
+          "legendFormat": "p99 {{method}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Booking conflicts (BAY_UNAVAILABLE / TECHNICIAN_UNAVAILABLE)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "id": 6,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(bookings_conflict_total[1m])) by (resource)",
+          "refId": "A",
+          "legendFormat": "{{resource}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "type": "row",
+      "title": "Throughput & Errors",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 102,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Request rate by status",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "id": 7,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[1m])) by (status)",
+          "refId": "A",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Idempotency cache hits / misses / conflicts",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "id": 8,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(idempotency_cache_total[1m])) by (result)",
+          "refId": "A",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "tags": ["keyloop", "scheduler"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Keyloop Scheduler — SLO Dashboard",
+  "uid": "keyloop-slo",
+  "version": 1,
+  "weekStart": ""
+}

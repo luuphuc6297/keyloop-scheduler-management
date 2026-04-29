@@ -26,3 +26,19 @@ services:
     ports:
       - "9090:9090"
     profiles: ["observability"]
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: keyloop-grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./loadtest/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./loadtest/grafana-dashboard.json:/var/lib/grafana/dashboards/keyloop-slo.json:ro
+    ports:
+      - "3030:3000"
+    depends_on:
+      - prometheus
+    profiles: ["observability"]
