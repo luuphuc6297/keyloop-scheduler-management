@@ -11,8 +11,11 @@ import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
+import { CustomersModule } from './modules/customers/customers.module';
+import { DealershipsModule } from './modules/dealerships/dealerships.module';
 import { HealthModule } from './modules/health/health.module';
 import { ObservabilityModule } from './modules/observability/observability.module';
+import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { RequestIdMiddleware } from './shared/middleware/request-id.middleware';
 
 type RequestWithId = IncomingMessage & { id?: string | number };
@@ -72,8 +75,11 @@ type RequestWithId = IncomingMessage & { id?: string | number };
     ]),
     AuthModule,
     AppointmentsModule,
+    CustomersModule,
+    DealershipsModule,
     HealthModule,
     ObservabilityModule,
+    VehiclesModule,
   ],
   controllers: [],
   providers: [
