@@ -7,6 +7,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { LoggerModule, type Params } from 'nestjs-pino';
 import { ConfigModule } from './config/config.module';
 import type { AppConfig } from './config/config.schema';
+import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
@@ -70,6 +71,7 @@ type RequestWithId = IncomingMessage & { id?: string | number };
       { name: 'medium', ttl: 60_000, limit: 100 },
     ]),
     AuthModule,
+    AppointmentsModule,
     HealthModule,
     ObservabilityModule,
   ],

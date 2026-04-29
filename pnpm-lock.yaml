@@ -82,6 +82,9 @@ importers:
       helmet:
         specifier: ^7.1.0
         version: 7.2.0
+      luxon:
+        specifier: ^3.5.0
+        version: 3.7.2
       nestjs-pino:
         specifier: ^4.1.0
         version: 4.6.1(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@10.5.0)(pino@9.14.0)(rxjs@7.8.2)
@@ -143,6 +146,9 @@ importers:
       "@types/jest":
         specifier: ^29.5.12
         version: 29.5.14
+      "@types/luxon":
+        specifier: ^3.4.2
+        version: 3.7.1
       "@types/node":
         specifier: ^20.14.15
         version: 20.19.39
@@ -2578,6 +2584,12 @@ packages:
     resolution:
       {
         integrity: sha512-VRLSGzik+Unrup6BsouBeHsf4d1hOEgYWTm/7Nmw1sXoN1+tRly/Gy/po3yeahnP4jfnQWWAhQAqcNfH7ngOkA==,
+      }
+
+  "@types/luxon@3.7.1":
+    resolution:
+      {
+        integrity: sha512-H3iskjFIAn5SlJU7OuxUmTEpebK6TKB8rxZShDslBMZJ5u9S//KM1sbdAisiSrqwLQncVjnpi2OK2J51h+4lsg==,
       }
 
   "@types/memcached@2.2.10":
@@ -6756,6 +6768,13 @@ packages:
       }
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0-rc
+
+  luxon@3.7.2:
+    resolution:
+      {
+        integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==,
+      }
+    engines: { node: ">=12" }
 
   magic-string@0.30.8:
     resolution:
@@ -11387,6 +11406,8 @@ snapshots:
     dependencies:
       "@types/node": 20.19.39
 
+  "@types/luxon@3.7.1": {}
+
   "@types/memcached@2.2.10":
     dependencies:
       "@types/node": 20.19.39
@@ -14290,6 +14311,8 @@ snapshots:
   lucide-react@0.438.0(react@19.0.0):
     dependencies:
       react: 19.0.0
+
+  luxon@3.7.2: {}
 
   magic-string@0.30.8:
     dependencies:
