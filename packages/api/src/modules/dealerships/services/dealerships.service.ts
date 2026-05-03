@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { applyRlsContext } from '../../../shared/db/rls-context';
 
 interface CatalogContext {
@@ -175,7 +175,6 @@ export class DealershipsService {
       return { hours, exceptions };
     });
   }
-
 }
 
 function toIso(value: Date | string): string {

@@ -27,10 +27,7 @@ export class DbErrorTranslator {
     return err;
   }
 
-  private translateExclusionViolation(
-    driver: { constraint?: string },
-    fallback: Error,
-  ): Error {
+  private translateExclusionViolation(driver: { constraint?: string }, fallback: Error): Error {
     if (driver.constraint === 'appt_bay_no_overlap') {
       this.metrics.bookingsConflictTotal.labels({ resource: 'bay' }).inc();
       return new ConflictException({

@@ -26,11 +26,7 @@ import {
   validateTechnicianAvailability,
 } from '../domain/validators';
 import type { AppointmentResponse, BookAppointmentDto } from '../dtos/book-appointment.schema';
-import {
-  decodeCursor,
-  encodeCursor,
-  type ListAppointmentsQuery,
-} from '../dtos/list-appointments.schema';
+import { decodeCursor, encodeCursor, type ListAppointmentsQuery } from '../dtos/list-appointments.schema';
 import type { RescheduleAppointmentDto } from '../dtos/reschedule-appointment.schema';
 import { AppointmentHistoryRecorder } from './appointment-history-recorder';
 import { DbErrorTranslator } from './db-error-translator';
@@ -201,8 +197,7 @@ export class AppointmentsService {
       const hasMore = rows.length > query.limit;
       const page = hasMore ? rows.slice(0, query.limit) : rows;
       const last = page[page.length - 1];
-      const nextCursor =
-        hasMore && last ? encodeCursor(extractLowerBound(last.time_range), last.id) : null;
+      const nextCursor = hasMore && last ? encodeCursor(extractLowerBound(last.time_range), last.id) : null;
 
       return {
         data: page.map(toResponse),
@@ -328,14 +323,7 @@ export class AppointmentsService {
       const oldResponse = toResponse(current);
       const newResponse = toResponse(updated);
       await this.historyRecorder.record(manager, updated, ctx, 'rescheduled', oldResponse, newResponse);
-      await this.outbox.emit(
-        manager,
-        'appointment',
-        updated.id,
-        'appointment.rescheduled',
-        newResponse,
-        ctx,
-      );
+      await this.outbox.emit(manager, 'appointment', updated.id, 'appointment.rescheduled', newResponse, ctx);
 
       this.logger.log(`appointment.rescheduled id=${id} v=${updated.version}`);
       return newResponse;
@@ -361,14 +349,7 @@ export class AppointmentsService {
       const oldResponse = toResponse(current);
       const newResponse = toResponse(updated);
       await this.historyRecorder.record(manager, updated, ctx, 'cancelled', oldResponse, newResponse);
-      await this.outbox.emit(
-        manager,
-        'appointment',
-        updated.id,
-        'appointment.cancelled',
-        newResponse,
-        ctx,
-      );
+      await this.outbox.emit(manager, 'appointment', updated.id, 'appointment.cancelled', newResponse, ctx);
 
       this.metrics.appointmentsStatusTransitionTotal
         .labels({ from: current.status, to: updated.status })
@@ -486,11 +467,7 @@ export class AppointmentsService {
     return rows[0]!;
   }
 
-  private buildTimeRange(
-    startAt: string,
-    service: ServiceTypeRow,
-    timezone: string,
-  ): ComputedTimeRange {
+  private buildTimeRange(startAt: string, service: ServiceTypeRow, timezone: string): ComputedTimeRange {
     try {
       return computeTimeRange({
         startAt,

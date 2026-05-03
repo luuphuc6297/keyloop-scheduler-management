@@ -27,10 +27,7 @@ export interface RlsTenantContext {
  *
  * Reference: design doc §7.5 + §7.6 + ADR 0002.
  */
-export async function applyRlsContext(
-  manager: EntityManager,
-  ctx: RlsTenantContext,
-): Promise<void> {
+export async function applyRlsContext(manager: EntityManager, ctx: RlsTenantContext): Promise<void> {
   await manager.query(`SELECT set_config('app.current_dealership', $1, true)`, [ctx.dealershipId]);
   await manager.query(`SELECT set_config('app.current_user_id', $1, true)`, [ctx.userId]);
   if (ctx.requestId) {

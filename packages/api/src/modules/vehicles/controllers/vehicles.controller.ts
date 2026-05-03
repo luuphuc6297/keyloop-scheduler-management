@@ -5,11 +5,7 @@ import { Tenant, type TenantContext } from '../../auth/decorators/tenant-context
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import {
-  SearchVehiclesSchema,
-  type SearchVehiclesQuery,
-  type VehicleResponse,
-} from '../dtos/vehicle.schema';
+import { SearchVehiclesSchema, type SearchVehiclesQuery, type VehicleResponse } from '../dtos/vehicle.schema';
 import { VehiclesService } from '../services/vehicles.service';
 
 @Controller('api/v1/vehicles')

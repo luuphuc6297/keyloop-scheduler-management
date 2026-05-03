@@ -16,9 +16,7 @@ describe('Catalog & GDPR (e2e)', () => {
   const password = 'CorrectHorseBatteryStaple!';
 
   async function login(): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/v1/auth/login')
-      .send({ email, password });
+    const res = await request(app.getHttpServer()).post('/api/v1/auth/login').send({ email, password });
     return res.body.accessToken;
   }
 
@@ -49,10 +47,9 @@ describe('Catalog & GDPR (e2e)', () => {
       `DELETE FROM idempotency_record WHERE user_id IN (SELECT id FROM app_user WHERE email = $1)`,
       [email],
     );
-    await ds.query(
-      `DELETE FROM refresh_token WHERE user_id IN (SELECT id FROM app_user WHERE email = $1)`,
-      [email],
-    );
+    await ds.query(`DELETE FROM refresh_token WHERE user_id IN (SELECT id FROM app_user WHERE email = $1)`, [
+      email,
+    ]);
     await ds.query(`DELETE FROM app_user WHERE email = $1`, [email]);
     await ds.query(`DELETE FROM vehicle WHERE customer_id IN (SELECT id FROM customer WHERE email = $1)`, [
       email,
@@ -95,10 +92,9 @@ describe('Catalog & GDPR (e2e)', () => {
       `DELETE FROM idempotency_record WHERE user_id IN (SELECT id FROM app_user WHERE email = $1)`,
       [email],
     );
-    await ds.query(
-      `DELETE FROM refresh_token WHERE user_id IN (SELECT id FROM app_user WHERE email = $1)`,
-      [email],
-    );
+    await ds.query(`DELETE FROM refresh_token WHERE user_id IN (SELECT id FROM app_user WHERE email = $1)`, [
+      email,
+    ]);
     await ds.query(`DELETE FROM app_user WHERE email = $1`, [email]);
     await ds.query(`DELETE FROM vehicle WHERE id = $1`, [vehicleId]);
     await ds.query(`DELETE FROM customer WHERE id = $1`, [customerId]);

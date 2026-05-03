@@ -1,9 +1,4 @@
-import {
-  CallHandler,
-  ExecutionContext,
-  Injectable,
-  NestInterceptor,
-} from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Observable, tap } from 'rxjs';
 import { MetricsService } from './metrics.service';
@@ -30,9 +25,7 @@ export class HttpMetricsInterceptor implements NestInterceptor {
     const record = (status: number) => {
       const route = req.route?.path ?? req.url ?? 'unknown';
       const duration = Number(process.hrtime.bigint() - start) / 1e9;
-      this.metrics.httpRequestDuration
-        .labels({ method, route, status: String(status) })
-        .observe(duration);
+      this.metrics.httpRequestDuration.labels({ method, route, status: String(status) }).observe(duration);
       this.metrics.httpRequestsTotal.labels({ method, route, status: String(status) }).inc();
       if (status === 429) {
         this.metrics.rateLimitExceededTotal.labels({ route }).inc();

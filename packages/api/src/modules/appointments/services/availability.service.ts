@@ -94,10 +94,7 @@ export class AvailabilityService {
     }
   }
 
-  private async findSlotsInner(
-    query: AvailabilityQuery,
-    ctx: BookContext,
-  ): Promise<AvailabilitySlot[]> {
+  private async findSlotsInner(query: AvailabilityQuery, ctx: BookContext): Promise<AvailabilitySlot[]> {
     return this.ds.transaction(async (manager) => {
       await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
 
@@ -220,16 +217,12 @@ export class AvailabilityService {
         [dealershipId, requiredSkillId],
       )) as TechnicianRow[];
     }
-    return (await manager.query(
-      `SELECT id FROM technician WHERE dealership_id = $1 AND is_active`,
-      [dealershipId],
-    )) as TechnicianRow[];
+    return (await manager.query(`SELECT id FROM technician WHERE dealership_id = $1 AND is_active`, [
+      dealershipId,
+    ])) as TechnicianRow[];
   }
 
-  private async loadBusinessHours(
-    manager: EntityManager,
-    dealershipId: string,
-  ): Promise<BusinessHoursRow[]> {
+  private async loadBusinessHours(manager: EntityManager, dealershipId: string): Promise<BusinessHoursRow[]> {
     return (await manager.query(
       `SELECT day_of_week, open_time::text AS open_time, close_time::text AS close_time
          FROM business_hours WHERE dealership_id = $1`,

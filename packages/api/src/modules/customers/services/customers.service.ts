@@ -4,11 +4,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { applyRlsContext } from '../../../shared/db/rls-context';
 import { unwrapUpdateRows } from '../../../shared/db/raw-update';
 import { MetricsService } from '../../observability/metrics.service';
-import type {
-  CustomerExportResponse,
-  CustomerResponse,
-  SearchCustomersQuery,
-} from '../dtos/customer.schema';
+import type { CustomerExportResponse, CustomerResponse, SearchCustomersQuery } from '../dtos/customer.schema';
 
 interface CustomerContext {
   userId: string;

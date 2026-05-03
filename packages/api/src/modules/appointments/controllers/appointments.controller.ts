@@ -13,7 +13,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { SkipThrottle, Throttle } from '@nestjs/throttler';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe';
 import { Tenant, type TenantContext } from '../../auth/decorators/tenant-context.decorator';
@@ -27,10 +27,7 @@ import {
   type BookAppointmentDto,
   BookAppointmentSchema,
 } from '../dtos/book-appointment.schema';
-import {
-  ListAppointmentsSchema,
-  type ListAppointmentsQuery,
-} from '../dtos/list-appointments.schema';
+import { ListAppointmentsSchema, type ListAppointmentsQuery } from '../dtos/list-appointments.schema';
 import {
   RescheduleAppointmentSchema,
   type RescheduleAppointmentDto,

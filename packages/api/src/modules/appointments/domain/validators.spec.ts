@@ -1,7 +1,4 @@
-import {
-  BookingValidationError,
-  validateRangeDoesNotCrossUnsafeDstTransition,
-} from './validators';
+import { BookingValidationError, validateRangeDoesNotCrossUnsafeDstTransition } from './validators';
 
 describe('validateRangeDoesNotCrossUnsafeDstTransition', () => {
   const tz = 'America/New_York';

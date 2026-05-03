@@ -47,9 +47,7 @@ if (otlpEndpoint || consoleEnabled) {
 
   sdk.start();
   // eslint-disable-next-line no-console
-  console.log(
-    `[tracing] OTel SDK started (exporter: ${otlpEndpoint ? 'OTLP→' + otlpEndpoint : 'console'})`,
-  );
+  console.log(`[tracing] OTel SDK started (exporter: ${otlpEndpoint ? 'OTLP→' + otlpEndpoint : 'console'})`);
 
   process.on('SIGTERM', () => {
     sdk.shutdown().catch((err) => console.error('OTel shutdown error:', err));

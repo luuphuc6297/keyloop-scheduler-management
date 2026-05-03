@@ -27,9 +27,7 @@ export class DealershipsController {
   @Get('service-types')
   @Roles('service_advisor', 'manager', 'technician')
   @Header('Cache-Control', 'private, max-age=300')
-  async serviceTypes(
-    @Tenant() ctx: TenantContext,
-  ): Promise<{ data: ServiceTypeResponse[] }> {
+  async serviceTypes(@Tenant() ctx: TenantContext): Promise<{ data: ServiceTypeResponse[] }> {
     const data = await this.svc.listServiceTypes(ctx);
     return { data };
   }
@@ -37,9 +35,7 @@ export class DealershipsController {
   @Get('technicians')
   @Roles('service_advisor', 'manager', 'technician')
   @Header('Cache-Control', 'private, max-age=300')
-  async technicians(
-    @Tenant() ctx: TenantContext,
-  ): Promise<{ data: TechnicianResponse[] }> {
+  async technicians(@Tenant() ctx: TenantContext): Promise<{ data: TechnicianResponse[] }> {
     const data = await this.svc.listTechnicians(ctx);
     return { data };
   }

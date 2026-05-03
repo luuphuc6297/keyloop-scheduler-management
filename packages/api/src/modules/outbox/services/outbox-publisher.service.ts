@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  type OnModuleDestroy,
-  type OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { applyRlsContext } from '../../../shared/db/rls-context';
@@ -136,10 +131,9 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
             payload: event.payload,
           })}`,
         );
-        await manager.query(
-          `UPDATE outbox_event SET published_at = now(), last_error = NULL WHERE id = $1`,
-          [event.id],
-        );
+        await manager.query(`UPDATE outbox_event SET published_at = now(), last_error = NULL WHERE id = $1`, [
+          event.id,
+        ]);
         this.metrics.outboxEventsTotal.labels({ result: 'success' }).inc();
         success += 1;
       } catch (err) {

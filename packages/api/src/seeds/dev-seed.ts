@@ -114,9 +114,13 @@ async function seed(): Promise<void> {
       const v1 = VEHICLE_TEMPLATES[idx % VEHICLE_TEMPLATES.length]!;
       const v2 = VEHICLE_TEMPLATES[(idx + 3) % VEHICLE_TEMPLATES.length]!;
       const giveSecond = idx % 2 === 0;
-      const rows = [`('${dealershipId}', '${c.id}', '${vinPrefix}${String(idx).padStart(2, '0')}${v1.make.toUpperCase().padEnd(8, 'X').slice(0, 8)}A001', '${v1.make}', '${v1.model}', ${v1.year})`];
+      const rows = [
+        `('${dealershipId}', '${c.id}', '${vinPrefix}${String(idx).padStart(2, '0')}${v1.make.toUpperCase().padEnd(8, 'X').slice(0, 8)}A001', '${v1.make}', '${v1.model}', ${v1.year})`,
+      ];
       if (giveSecond) {
-        rows.push(`('${dealershipId}', '${c.id}', '${vinPrefix}${String(idx).padStart(2, '0')}${v2.make.toUpperCase().padEnd(8, 'X').slice(0, 8)}B002', '${v2.make}', '${v2.model}', ${v2.year})`);
+        rows.push(
+          `('${dealershipId}', '${c.id}', '${vinPrefix}${String(idx).padStart(2, '0')}${v2.make.toUpperCase().padEnd(8, 'X').slice(0, 8)}B002', '${v2.make}', '${v2.model}', ${v2.year})`,
+        );
       }
       await ds.query(
         `INSERT INTO vehicle (dealership_id, customer_id, vin, make, model, year) VALUES ${rows.join(', ')}`,

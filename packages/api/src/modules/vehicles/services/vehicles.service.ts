@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { applyRlsContext } from '../../../shared/db/rls-context';
 import type { SearchVehiclesQuery, VehicleResponse } from '../dtos/vehicle.schema';
 
@@ -50,7 +50,6 @@ export class VehiclesService {
       return rows.map(toResponse);
     });
   }
-
 }
 
 function toResponse(row: VehicleRow): VehicleResponse {
