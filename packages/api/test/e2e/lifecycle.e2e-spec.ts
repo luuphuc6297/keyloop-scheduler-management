@@ -274,7 +274,10 @@ describe('Booking lifecycle (e2e)', () => {
     });
 
     it('rejects payload with no fields', async () => {
-      const created = await book('2026-07-03T17:00:00-04:00');
+      // 16:00 EDT is the latest valid Oil Change start (40-min total fits within
+      // 17:00 EDT technician shift end). 17:00 here used to pass before the
+      // §5.4 technician-availability validator was added.
+      const created = await book('2026-07-03T16:00:00-04:00');
       const res = await request(app.getHttpServer())
         .patch(`/api/v1/appointments/${created.id}`)
         .set('Authorization', `Bearer ${accessToken}`)
@@ -359,7 +362,10 @@ describe('Booking lifecycle (e2e)', () => {
 
   describe('GET /appointments/availability', () => {
     it('returns slots, excluding times overlapped by confirmed bookings', async () => {
-      const start = '2026-07-13T09:00:00-04:00';
+      // Booking date and query window must match — the prior version had a
+      // date typo (book 07-13, query 07-06) so the assertion was effectively
+      // a no-op before strict CI started running e2e suites.
+      const start = '2026-07-06T09:00:00-04:00';
       const created = await book(start, { technician_id: fx.altTechnicianId });
 
       const res = await request(app.getHttpServer())
@@ -374,7 +380,7 @@ describe('Booking lifecycle (e2e)', () => {
       expect(res.status).toBe(200);
       const overlap = res.body.data.find((s: { start_at: string }) => {
         // The booked start is 09:00 EDT == 13:00Z; any returned slot starting in
-        // [13:00Z, 13:30Z) would conflict
+        // [13:00Z, 13:30Z) would conflict.
         return s.start_at >= '2026-07-06T13:00:00.000Z' && s.start_at < '2026-07-06T13:30:00.000Z';
       });
       expect(overlap).toBeUndefined();
