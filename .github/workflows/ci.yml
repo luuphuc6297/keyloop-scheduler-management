@@ -23,6 +23,21 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+    env:
+      # Connection strings used by both the test runtime (AppModule) and the
+      # migration / seed scripts. `scheduler_app` is the runtime role; migrations
+      # need the owner role to ALTER ... FORCE ROW LEVEL SECURITY.
+      DATABASE_URL: postgresql://scheduler_app:app@localhost:5432/scheduler
+      DATABASE_URL_MIGRATIONS: postgresql://scheduler_owner:owner@localhost:5432/scheduler
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci-access-secret-must-be-32-chars-or-more-aaaa
+      JWT_REFRESH_SECRET: ci-refresh-secret-must-be-32-chars-or-more-bbbb
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      NODE_ENV: test
+      LOG_LEVEL: warn
+      # Tracing off — keeps stdout clean and avoids OTLP connection retries.
+      OTLP_ENDPOINT: ""
+      OTEL_CONSOLE: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
@@ -40,7 +55,18 @@ jobs:
       - run: pnpm --filter @keyloop/api lint
       - run: pnpm --filter @keyloop/api typecheck
       - run: pnpm --filter @keyloop/api test:unit
+      # Integration tests bring up their own schema via raw migration replay
+      # (see exclude-race.int-spec.ts), so no external migrate step is needed
+      # before this — but it's harmless either way.
       - run: pnpm --filter @keyloop/api test:int
+      # E2E suites hit the same Postgres as the AppModule. They expect both the
+      # full schema (migrations) and base seed data (dealership + technicians +
+      # service types + bays). Without these, every spec fails with
+      # "relation \"appointment_history\" does not exist" or similar.
+      - name: Migrate + seed for e2e
+        run: |
+          pnpm --filter @keyloop/api migration:run
+          pnpm --filter @keyloop/api seed:dev
       - run: pnpm --filter @keyloop/api test:e2e
       - run: pnpm --filter @keyloop/api build
 

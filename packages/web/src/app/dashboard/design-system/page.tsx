@@ -1,6 +1,6 @@
 'use client';
 
-import { Plus, Trash2, Calendar as CalIcon, AlertTriangle } from 'lucide-react';
+import { Plus, Calendar as CalIcon, AlertTriangle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';

@@ -52,7 +52,7 @@ export function HistoryTimeline({ entries, timezone }: Props) {
                 <span className="font-mono">{entry.changed_by.slice(0, 8)}…</span>
               </p>
               {entry.reason ? (
-                <p className="mt-1 text-xs italic text-muted-foreground">"{entry.reason}"</p>
+                <p className="mt-1 text-xs italic text-muted-foreground">&ldquo;{entry.reason}&rdquo;</p>
               ) : null}
             </div>
           </motion.li>
