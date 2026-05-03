@@ -24,10 +24,14 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      # Connection strings used by both the test runtime (AppModule) and the
-      # migration / seed scripts. `scheduler_app` is the runtime role; migrations
-      # need the owner role to ALTER ... FORCE ROW LEVEL SECURITY.
-      DATABASE_URL: postgresql://scheduler_app:app@localhost:5432/scheduler
+      # E2E tests connect AppModule to Postgres directly and run fixture setup
+      # queries (`SELECT FROM dealership ORDER BY created_at`) without setting
+      # the per-tx RLS GUC. They MUST use the owner role (BYPASSRLS) — this is
+      # what `test/setup.ts:9-12` defaults to locally. Pointing DATABASE_URL at
+      # scheduler_app here would silently filter every fixture row to zero,
+      # producing "Run seed first" errors despite a successful seed step.
+      # Reference: design doc §7.4, ADR-0002.
+      DATABASE_URL: postgresql://scheduler_owner:owner@localhost:5432/scheduler
       DATABASE_URL_MIGRATIONS: postgresql://scheduler_owner:owner@localhost:5432/scheduler
       REDIS_URL: redis://localhost:6379
       JWT_ACCESS_SECRET: ci-access-secret-must-be-32-chars-or-more-aaaa
