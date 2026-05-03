@@ -10,6 +10,10 @@ export const configSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   OTLP_ENDPOINT: z.string().optional().default(''),
+  OTEL_CONSOLE: z
+    .union([z.literal('true'), z.literal('false'), z.literal('')])
+    .optional()
+    .default('false'),
   CORS_ALLOWED_ORIGINS: z.string().min(1),
   APP_VERSION: z.string().default('dev'),
 });

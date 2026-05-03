@@ -69,19 +69,22 @@ type RequestWithId = IncomingMessage & { id?: string | number };
         synchronize: false,
         logging: config.get('LOG_LEVEL') === 'debug' ? 'all' : ['error', 'warn'],
         cache: false,
+        // Pool tuning. Default is 10; bumping to 20 covers the worker + soak
+        // load. The `MaxListenersExceededWarning` from pg.Pool is suppressed
+        // by raising EventEmitter.defaultMaxListeners in bootstrap-env.ts
+        // (pg.Pool extends EventEmitter and doesn't expose a config knob).
+        extra: { max: 20 },
       }),
     }),
     ThrottlerModule.forRoot([
-      // Default tiers — apply to every route unless overridden
-      { name: 'short', ttl: 1_000, limit: 20 },
-      { name: 'medium', ttl: 60_000, limit: 100 },
-      // Tighter named tiers — opt-in via @Throttle({ <name>: ... }) on specific endpoints.
-      // (Per-endpoint overrides are wired in the controllers; see also the
-      // RateLimitInterceptor which records 429 responses to the
-      // rate_limit_exceeded_total counter.)
-      { name: 'login', ttl: 15 * 60_000, limit: 5 }, // /auth/login: 5 / 15 min
-      { name: 'refresh', ttl: 5 * 60_000, limit: 10 }, // /auth/refresh: 10 / 5 min
-      { name: 'book', ttl: 60_000, limit: 30 }, // POST /appointments: 30 / min
+      // Global default tiers — apply to EVERY route. Anything stricter is
+      // declared inline with @Throttle({ default: ... }) on the specific
+      // controller method. (Earlier we kept named `login`/`refresh`/`book`
+      // tiers here too, but every tier in this array gates every route — the
+      // `login: 5/15min` was throttling the whole app, including the
+      // contention load test.)
+      { name: 'short', ttl: 1_000, limit: 100 },
+      { name: 'medium', ttl: 60_000, limit: 500 },
     ]),
     AuthModule,
     AppointmentsModule,

@@ -60,7 +60,7 @@ export class DealershipsService {
 
   async findMe(ctx: CatalogContext): Promise<DealershipResponse> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
       const rows = (await manager.query(
         `SELECT id, name, timezone, created_at, updated_at
            FROM dealership WHERE id = $1`,
@@ -88,7 +88,7 @@ export class DealershipsService {
 
   async listServiceTypes(ctx: CatalogContext): Promise<ServiceTypeResponse[]> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
       return (await manager.query(
         `SELECT id, name, duration_minutes, buffer_minutes, required_skill_id
            FROM service_type
@@ -101,7 +101,7 @@ export class DealershipsService {
 
   async listTechnicians(ctx: CatalogContext): Promise<TechnicianResponse[]> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
       const rows = (await manager.query(
         `SELECT t.id, t.first_name, t.last_name, t.employee_code, t.is_active,
                 COALESCE(
@@ -136,7 +136,7 @@ export class DealershipsService {
 
   async listBays(ctx: CatalogContext): Promise<BayResponse[]> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
       return (await manager.query(
         `SELECT id, name, is_active FROM bay
           WHERE dealership_id = $1
@@ -148,7 +148,7 @@ export class DealershipsService {
 
   async getBusinessHours(ctx: CatalogContext): Promise<BusinessHoursResponse> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
       const hours = (await manager.query(
         `SELECT day_of_week, open_time::text AS open_time, close_time::text AS close_time
            FROM business_hours
@@ -176,9 +176,6 @@ export class DealershipsService {
     });
   }
 
-  private async setRlsContext(manager: EntityManager, ctx: CatalogContext): Promise<void> {
-    await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
-  }
 }
 
 function toIso(value: Date | string): string {

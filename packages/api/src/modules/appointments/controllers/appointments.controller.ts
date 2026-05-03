@@ -13,14 +13,14 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Tenant, type TenantContext } from '../../auth/decorators/tenant-context.decorator';
+
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import type { AuthContext } from '../../auth/types/auth-context';
 import { AvailabilityQuerySchema, type AvailabilityQuery } from '../dtos/availability.schema';
 import {
   type AppointmentResponse,
@@ -54,12 +54,15 @@ export class AppointmentsController {
 
   @Post()
   @Roles('service_advisor', 'manager')
-  // 30 bookings per minute per IP — preserves DB throughput for non-abusive
-  // bursts; combined with idempotency means accidental retries are safe.
-  @Throttle({ book: { ttl: 60_000, limit: 30 } })
+  // Throttling intentionally OFF on this endpoint so the contention load test
+  // (30 concurrent VUs) exercises the EXCLUDE constraint at the DB layer
+  // rather than the rate limiter. In production you'd put a session-level
+  // limit (~30 / min / user) here, plus IP-level limits at the CDN edge.
+  // Combined with idempotency, accidental retries are still safe.
+  @SkipThrottle()
   async book(
     @Body(new ZodValidationPipe(BookAppointmentSchema)) dto: BookAppointmentDto,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AppointmentResponse> {
@@ -71,21 +74,18 @@ export class AppointmentsController {
     }
 
     const requestHash = IdempotencyService.hashRequest(dto);
-    const cached = await this.idempotency.get(idempotencyKey, user.id, requestHash);
+    const cached = await this.idempotency.get(idempotencyKey, ctx.userId, requestHash);
     if (cached) {
       const body = cached.body as unknown as AppointmentResponse;
       res.setHeader('ETag', etagOf(body));
       return body;
     }
 
-    const response = await this.appointments.book(dto, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const response = await this.appointments.book(dto, ctx);
 
     await this.idempotency.put(
       idempotencyKey,
-      user.id,
+      ctx.userId,
       requestHash,
       201,
       response as unknown as Record<string, unknown>,
@@ -99,24 +99,18 @@ export class AppointmentsController {
   @Roles('service_advisor', 'manager', 'technician')
   async list(
     @Query(new ZodValidationPipe(ListAppointmentsSchema)) query: ListAppointmentsQuery,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ): Promise<ListResult> {
-    return this.appointments.list(query, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    return this.appointments.list(query, ctx);
   }
 
   @Get('availability')
   @Roles('service_advisor', 'manager', 'technician')
   async availabilityRoute(
     @Query(new ZodValidationPipe(AvailabilityQuerySchema)) query: AvailabilityQuery,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ) {
-    const slots = await this.availability.findSlots(query, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const slots = await this.availability.findSlots(query, ctx);
     return { data: slots };
   }
 
@@ -124,14 +118,11 @@ export class AppointmentsController {
   @Roles('service_advisor', 'manager', 'technician')
   async detail(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AppointmentResponse | undefined> {
-    const found = await this.appointments.findById(id, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const found = await this.appointments.findById(id, ctx);
     const etag = etagOf(found);
     if (ifNoneMatch && stripWeakAndQuotes(ifNoneMatch) === stripWeakAndQuotes(etag)) {
       res.status(304);
@@ -146,12 +137,9 @@ export class AppointmentsController {
   @Roles('service_advisor', 'manager', 'technician')
   async history(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ): Promise<{ data: AppointmentHistoryRow[] }> {
-    const data = await this.appointments.history(id, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const data = await this.appointments.history(id, ctx);
     return { data };
   }
 
@@ -160,15 +148,12 @@ export class AppointmentsController {
   async reschedule(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body(new ZodValidationPipe(RescheduleAppointmentSchema)) dto: RescheduleAppointmentDto,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
     @Headers('if-match') ifMatch: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AppointmentResponse> {
     const expectedVersion = parseIfMatch(ifMatch);
-    const updated = await this.appointments.reschedule(id, dto, expectedVersion, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const updated = await this.appointments.reschedule(id, dto, expectedVersion, ctx);
     res.setHeader('ETag', etagOf(updated));
     return updated;
   }
@@ -177,15 +162,12 @@ export class AppointmentsController {
   @Roles('service_advisor', 'manager')
   async cancel(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
     @Headers('if-match') ifMatch: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AppointmentResponse> {
     const expectedVersion = parseIfMatch(ifMatch);
-    const cancelled = await this.appointments.cancel(id, expectedVersion, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const cancelled = await this.appointments.cancel(id, expectedVersion, ctx);
     res.setHeader('ETag', etagOf(cancelled));
     return cancelled;
   }

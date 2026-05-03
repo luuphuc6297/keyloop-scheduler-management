@@ -22,11 +22,14 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
-import { ulid } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
+// k6-utils doesn't export ulid; use an inline unique-id generator.
+function uniqueId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${__VU}-${__ITER}`;
+}
 
 const API_BASE = __ENV.API_BASE || 'http://localhost:3001';
-const API_EMAIL = __ENV.API_EMAIL || 'lifecycle-test@example.com';
-const API_PASSWORD = __ENV.API_PASSWORD || 'CorrectHorseBatteryStaple!';
+const API_EMAIL = __ENV.API_EMAIL || 'admin@nyc-auto.local';
+const API_PASSWORD = __ENV.API_PASSWORD || 'Demo1234!';
 
 const errorRate = new Rate('error_rate');
 const readLatency = new Trend('read_latency_ms');
@@ -57,7 +60,11 @@ export function setup() {
     JSON.stringify({ email: API_EMAIL, password: API_PASSWORD }),
     { headers: { 'content-type': 'application/json' } },
   );
-  check(loginRes, { 'login OK': (r) => r.status === 200 });
+  if (loginRes.status !== 200) {
+    throw new Error(
+      `Login failed (${loginRes.status}). Run pnpm --filter @keyloop/api seed:dev first.`,
+    );
+  }
   const accessToken = JSON.parse(loginRes.body).accessToken;
 
   const headers = { authorization: `Bearer ${accessToken}` };
@@ -68,18 +75,24 @@ export function setup() {
     http.get(`${API_BASE}/api/v1/dealerships/me/technicians`, { headers }).body,
   ).data;
   const bays = JSON.parse(http.get(`${API_BASE}/api/v1/dealerships/me/bays`, { headers }).body).data;
+  // Empty `q` returns the dealership's recent customers (the seed creates 10).
   const customers = JSON.parse(
-    http.get(`${API_BASE}/api/v1/customers?q=Lifecycle`, { headers }).body,
+    http.get(`${API_BASE}/api/v1/customers?limit=20`, { headers }).body,
   ).data;
+  if (!customers || customers.length === 0) {
+    throw new Error('No customers seeded. Run pnpm --filter @keyloop/api seed:dev first.');
+  }
   const customer = customers[0];
   const vehicles = JSON.parse(
     http.get(`${API_BASE}/api/v1/vehicles?customer_id=${customer.id}`, { headers }).body,
   ).data;
+  // Pick a service every technician can perform (Oil Change has OIL_CHANGE skill, all techs have it)
+  const oilChange = services.find((s) => s.name === 'Oil Change') || services[0];
 
   return {
     accessToken,
     fixture: {
-      service_type_id: services[0].id,
+      service_type_id: oilChange.id,
       technician_ids: technicians.map((t) => t.id),
       bay_id: bays[0].id,
       customer_id: customer.id,
@@ -132,7 +145,7 @@ function pickWrite(headers, fx) {
       bay_id: fx.bay_id,
     }),
     {
-      headers: { ...headers, 'content-type': 'application/json', 'idempotency-key': ulid() },
+      headers: { ...headers, 'content-type': 'application/json', 'idempotency-key': uniqueId() },
       tags: { endpoint: 'POST /appointments' },
     },
   );

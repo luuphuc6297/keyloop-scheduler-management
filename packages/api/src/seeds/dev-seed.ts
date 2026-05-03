@@ -1,5 +1,6 @@
 import * as dotenv from 'dotenv';
 import * as path from 'node:path';
+import * as argon2 from 'argon2';
 import { DataSource } from 'typeorm';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
@@ -55,12 +56,18 @@ async function seed(): Promise<void> {
   `)) as Array<{ id: string; code: string }>;
   const skillByCode = Object.fromEntries(skills.map((s) => [s.code, s.id]));
 
+  // Hash the demo password ONCE (argon2id is slow on purpose; ~150ms each).
+  // Demo creds — call this out in the README:
+  //   admin@nyc-auto.local / Demo1234!
+  //   admin@la-auto.local  / Demo1234!
+  const DEMO_PASSWORD = 'Demo1234!';
+  const passwordHash = await argon2.hash(DEMO_PASSWORD, { type: argon2.argon2id });
+
   for (const dealership of [dA, dB]) {
     const dealershipId = dealership.id;
     const isNYC = dealership.name.includes('NYC');
-    const passwordHash = '$argon2id$v=19$m=65536,t=3,p=4$placeholder$placeholder';
 
-    // App user (Phase 3 will replace placeholder hash with real argon2 output)
+    // App user — login with email above + password "Demo1234!"
     const [user] = (await ds.query(
       `INSERT INTO app_user (dealership_id, email, password_hash, roles)
        VALUES ($1, $2, $3, $4) RETURNING id`,
@@ -73,23 +80,46 @@ async function seed(): Promise<void> {
     )) as Array<{ id: string }>;
     if (!user) throw new Error('app_user seed failed');
 
-    // 2 customers
+    // 10 realistic customers per dealership
+    const FIRST_NAMES = ['Alice', 'Bob', 'Carol', 'David', 'Emma', 'Frank', 'Grace', 'Henry', 'Iris', 'Jack'];
+    const LAST_NAMES = ['Nguyen', 'Tran', 'Le', 'Pham', 'Hoang', 'Vu', 'Dang', 'Bui', 'Do', 'Ngo'];
+    const tag = isNYC ? 'nyc' : 'la';
+    const customerValues = FIRST_NAMES.map((first, i) => {
+      const last = LAST_NAMES[i]!;
+      const phone = `+1-555-${String(isNYC ? 1000 + i : 2000 + i).padStart(4, '0')}`;
+      return `('${dealershipId}', '${first}', '${last}', '${first.toLowerCase()}.${tag}@example.com', '${phone}')`;
+    }).join(',\n        ');
+
     const customers = (await ds.query(
       `INSERT INTO customer (dealership_id, first_name, last_name, email, phone) VALUES
-        ($1, 'Alice', 'Nguyen', 'alice.${isNYC ? 'nyc' : 'la'}@example.com', '+1-555-0001'),
-        ($1, 'Bob', 'Tran', 'bob.${isNYC ? 'nyc' : 'la'}@example.com', '+1-555-0002')
+        ${customerValues}
        RETURNING id`,
-      [dealershipId],
     )) as Array<{ id: string }>;
 
-    // 2 vehicles per customer
+    // 1–2 vehicles per customer (mix of brands so the demo looks realistic)
+    const VEHICLE_TEMPLATES = [
+      { make: 'Toyota', model: 'Camry', year: 2022 },
+      { make: 'Tesla', model: 'Model 3', year: 2023 },
+      { make: 'Honda', model: 'CR-V', year: 2021 },
+      { make: 'Ford', model: 'F-150', year: 2020 },
+      { make: 'Subaru', model: 'Outback', year: 2024 },
+      { make: 'Hyundai', model: 'Ioniq 5', year: 2024 },
+      { make: 'BMW', model: '3 Series', year: 2022 },
+      { make: 'Mazda', model: 'CX-5', year: 2023 },
+      { make: 'Nissan', model: 'Altima', year: 2021 },
+      { make: 'Volkswagen', model: 'Golf', year: 2022 },
+    ];
+    const vinPrefix = isNYC ? 'NY' : 'LA';
     for (const [idx, c] of customers.entries()) {
-      const vinPrefix = isNYC ? 'NY' : 'LA';
+      const v1 = VEHICLE_TEMPLATES[idx % VEHICLE_TEMPLATES.length]!;
+      const v2 = VEHICLE_TEMPLATES[(idx + 3) % VEHICLE_TEMPLATES.length]!;
+      const giveSecond = idx % 2 === 0;
+      const rows = [`('${dealershipId}', '${c.id}', '${vinPrefix}${String(idx).padStart(2, '0')}${v1.make.toUpperCase().padEnd(8, 'X').slice(0, 8)}A001', '${v1.make}', '${v1.model}', ${v1.year})`];
+      if (giveSecond) {
+        rows.push(`('${dealershipId}', '${c.id}', '${vinPrefix}${String(idx).padStart(2, '0')}${v2.make.toUpperCase().padEnd(8, 'X').slice(0, 8)}B002', '${v2.make}', '${v2.model}', ${v2.year})`);
+      }
       await ds.query(
-        `INSERT INTO vehicle (dealership_id, customer_id, vin, make, model, year) VALUES
-          ($1, $2, $3, 'Toyota', 'Camry', 2022),
-          ($1, $2, $4, 'Tesla', 'Model 3', 2023)`,
-        [dealershipId, c.id, `${vinPrefix}${idx}TOYOTA0000000001`, `${vinPrefix}${idx}TESLA00000000002`],
+        `INSERT INTO vehicle (dealership_id, customer_id, vin, make, model, year) VALUES ${rows.join(', ')}`,
       );
     }
 
@@ -167,6 +197,11 @@ async function seed(): Promise<void> {
   }
 
   console.log('Seed complete.');
+  console.log('');
+  console.log('Demo login credentials:');
+  console.log('  admin@nyc-auto.local / Demo1234!  (NYC dealership, America/New_York)');
+  console.log('  admin@la-auto.local  / Demo1234!  (LA dealership, America/Los_Angeles)');
+  console.log('');
   await ds.destroy();
 }
 

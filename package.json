@@ -7,12 +7,13 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "bootstrap": "bash scripts/dev-bootstrap.sh",
     "lint": "pnpm -r run lint",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "build": "pnpm -r run build",
     "dev": "pnpm --parallel -r run dev",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.4.0",

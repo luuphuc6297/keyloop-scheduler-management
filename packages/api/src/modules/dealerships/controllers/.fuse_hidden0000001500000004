@@ -1,0 +1,73 @@
+import { Controller, Get, Header, UseGuards } from '@nestjs/common';
+import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import type { AuthContext } from '../../auth/types/auth-context';
+import {
+  DealershipsService,
+  type BayResponse,
+  type BusinessHoursResponse,
+  type DealershipResponse,
+  type ServiceTypeResponse,
+  type TechnicianResponse,
+} from '../services/dealerships.service';
+
+@Controller('api/v1/dealerships/me')
+@UseGuards(JwtAuthGuard, RolesGuard)
+export class DealershipsController {
+  constructor(private readonly svc: DealershipsService) {}
+
+  @Get()
+  @Roles('service_advisor', 'manager', 'technician')
+  async me(@TenantContext() ctx: TenantContext): Promise<DealershipResponse> {
+    return this.svc.findMe(ctx);
+  }
+
+  @Get('service-types')
+  @Roles('service_advisor', 'manager', 'technician')
+  @Header('Cache-Control', 'private, max-age=300')
+  async serviceTypes(
+    @TenantContext() ctx: TenantContext,
+  ): Promise<{ data: ServiceTypeResponse[] }> {
+    const data = await this.svc.listServiceTypes({
+      userId: ctx.userId,
+      dealershipId: ctx.dealershipId,
+    });
+    return { data };
+  }
+
+  @Get('technicians')
+  @Roles('service_advisor', 'manager', 'technician')
+  @Header('Cache-Control', 'private, max-age=300')
+  async technicians(
+    @TenantContext() ctx: TenantContext,
+  ): Promise<{ data: TechnicianResponse[] }> {
+    const data = await this.svc.listTechnicians({
+      userId: ctx.userId,
+      dealershipId: ctx.dealershipId,
+    });
+    return { data };
+  }
+
+  @Get('bays')
+  @Roles('service_advisor', 'manager', 'technician')
+  @Header('Cache-Control', 'private, max-age=300')
+  async bays(@TenantContext() ctx: TenantContext): Promise<{ data: BayResponse[] }> {
+    const data = await this.svc.listBays({
+      userId: ctx.userId,
+      dealershipId: ctx.dealershipId,
+    });
+    return { data };
+  }
+
+  @Get('business-hours')
+  @Roles('service_advisor', 'manager', 'technician')
+  @Header('Cache-Control', 'private, max-age=300')
+  async businessHours(@TenantContext() ctx: TenantContext): Promise<BusinessHoursResponse> {
+    return this.svc.getBusinessHours({
+      userId: ctx.userId,
+      dealershipId: ctx.dealershipId,
+    });
+  }
+}

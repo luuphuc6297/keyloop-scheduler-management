@@ -1,3 +1,6 @@
+// IMPORTANT: bootstrap-env must come before everything else — tracing.ts and
+// AppModule both read process.env at import time.
+import './bootstrap-env';
 import './tracing';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';

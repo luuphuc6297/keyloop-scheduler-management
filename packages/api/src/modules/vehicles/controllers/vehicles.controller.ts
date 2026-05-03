@@ -1,10 +1,10 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Tenant, type TenantContext } from '../../auth/decorators/tenant-context.decorator';
+
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import type { AuthContext } from '../../auth/types/auth-context';
 import {
   SearchVehiclesSchema,
   type SearchVehiclesQuery,
@@ -21,12 +21,9 @@ export class VehiclesController {
   @Roles('service_advisor', 'manager', 'technician')
   async search(
     @Query(new ZodValidationPipe(SearchVehiclesSchema)) query: SearchVehiclesQuery,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ): Promise<{ data: VehicleResponse[] }> {
-    const data = await this.svc.search(query, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const data = await this.svc.search(query, ctx);
     return { data };
   }
 }

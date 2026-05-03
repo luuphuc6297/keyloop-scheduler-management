@@ -9,11 +9,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ZodValidationPipe } from '../../../shared/pipes/zod-validation.pipe';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Tenant, type TenantContext } from '../../auth/decorators/tenant-context.decorator';
+
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import type { AuthContext } from '../../auth/types/auth-context';
 import {
   AnonymizeCustomerSchema,
   type AnonymizeCustomerDto,
@@ -33,12 +33,9 @@ export class CustomersController {
   @Roles('service_advisor', 'manager')
   async search(
     @Query(new ZodValidationPipe(SearchCustomersSchema)) query: SearchCustomersQuery,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ): Promise<{ data: CustomerResponse[] }> {
-    const data = await this.svc.search(query, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const data = await this.svc.search(query, ctx);
     return { data };
   }
 
@@ -46,24 +43,18 @@ export class CustomersController {
   @Roles('service_advisor', 'manager')
   async detail(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ): Promise<CustomerResponse> {
-    return this.svc.findById(id, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    return this.svc.findById(id, ctx);
   }
 
   @Get(':id/data-export')
   @Roles('manager')
   async exportData(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ): Promise<CustomerExportResponse> {
-    return this.svc.exportData(id, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    return this.svc.exportData(id, ctx);
   }
 
   @Delete(':id')
@@ -71,11 +62,8 @@ export class CustomersController {
   async anonymize(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body(new ZodValidationPipe(AnonymizeCustomerSchema)) dto: AnonymizeCustomerDto,
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ): Promise<CustomerResponse> {
-    return this.svc.anonymize(id, dto.reason, {
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    return this.svc.anonymize(id, dto.reason, ctx);
   }
 }

@@ -2,36 +2,212 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ===========================================================
+ * Design tokens — adapted from Zeni v3 Rolly design system.
+ * Teal/emerald primary, warm whites, pill-shaped controls,
+ * generous radius, softly layered shadows.
+ *
+ * Tier 1: reference scales (slate, brand, accent, status).
+ * Tier 2: semantic mapping that components consume.
+ * =========================================================== */
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    /* ----- Reference: warm-white neutrals ----- */
+    --slate-50:  210 14% 97%;   /* #F6F8FA */
+    --slate-100: 214 22% 95%;   /* #EEF2F6 */
+    --slate-200: 214 15% 89%;
+    --slate-300: 214 12% 76%;
+    --slate-400: 218 11% 65%;   /* #9CA3AF */
+    --slate-500: 220 9% 46%;    /* #6B7280 */
+    --slate-600: 215 14% 34%;
+    --slate-700: 215 19% 25%;
+    --slate-800: 217 33% 17%;
+    --slate-900: 220 39% 11%;   /* #111827 */
+    --slate-950: 229 84% 5%;
+
+    /* ----- Reference: Rolly teal/emerald primary ----- */
+    --brand-50:  173 80% 95%;
+    --brand-100: 173 75% 88%;
+    --brand-200: 173 70% 78%;
+    --brand-300: 173 65% 65%;
+    --brand-400: 174 70% 50%;
+    --brand-500: 173 84% 35%;   /* #0EA5A0 — primary teal */
+    --brand-600: 168 76% 36%;   /* #10B981 — emerald accent for gradient */
+    --brand-700: 173 80% 28%;
+    --brand-800: 173 80% 22%;
+    --brand-900: 173 80% 16%;
+    --brand-950: 175 84% 10%;
+
+    /* Rolly-style brand gradient — used by primary buttons and hero amounts */
+    --brand-gradient: linear-gradient(135deg, hsl(173 84% 35%) 0%, hsl(168 76% 36%) 100%);
+    --brand-gradient-card: linear-gradient(160deg, hsl(173 84% 35%) 0%, hsl(160 84% 30%) 100%);
+
+    /* ----- Reference: accents (semantic feedback) ----- */
+    --accent-amber: 38 92% 50%;     /* #F59E0B — warning */
+    --accent-rose: 0 84% 60%;       /* #EF4444 — danger */
+    --accent-blue: 217 91% 60%;     /* #3B82F6 — info */
+    --accent-pink: 330 81% 60%;     /* #EC4899 */
+
+    /* ----- Reference: appointment status palette ----- */
+    --status-confirmed: 168 76% 36%;  /* emerald */
+    --status-completed: 217 91% 60%;  /* blue */
+    --status-cancelled: 218 11% 65%;  /* slate-400 */
+    --status-no-show:   38 92% 50%;   /* amber */
+
+    /* ===== Semantic — surfaces (Rolly 3-tier) ===== */
+    --background:        var(--slate-50);     /* #F6F8FA — page bg */
+    --foreground:        var(--slate-900);
+    --surface:           0 0% 100%;            /* card / dialog */
+    --surface-foreground: var(--slate-900);
+    --surface-muted:     var(--slate-100);     /* tertiary bg */
+    --surface-elevated:  0 0% 100%;            /* dropdown / popover */
+
+    /* ===== Semantic — text ===== */
+    --muted:             var(--slate-100);
+    --muted-foreground:  var(--slate-500);
+
+    /* ===== Semantic — primary (teal) ===== */
+    --primary:           var(--brand-500);
+    --primary-hover:     var(--brand-600);
+    --primary-foreground: 0 0% 100%;
+    --primary-soft:      173 84% 35% / 0.08;   /* tinted backgrounds */
+    --primary-medium:    173 84% 35% / 0.18;
+    --primary-strong:    173 84% 35% / 0.25;
+
+    /* ===== Semantic — feedback ===== */
+    --success:           168 76% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning:           var(--accent-amber);
+    --warning-foreground: var(--slate-900);
+    --danger:            var(--accent-rose);
+    --danger-foreground: 0 0% 100%;
+    --destructive:       var(--danger);
+    --destructive-foreground: var(--danger-foreground);
+    --info:              var(--accent-blue);
+    --info-foreground:   0 0% 100%;
+
+    /* ===== Semantic — chrome ===== */
+    --border:            220 13% 91%;
+    --border-strong:     220 13% 86%;
+    --border-active:     173 84% 35%;
+    --input:             220 13% 91%;
+    --ring:              var(--brand-500);
+
+    /* ===== Card aliases ===== */
+    --card:              0 0% 100%;
+    --card-foreground:   var(--slate-900);
+
+    /* ===== Geometry — Rolly is more rounded ===== */
+    --radius-xs:   8px;
+    --radius-sm:   10px;
+    --radius-md:   14px;
+    --radius-lg:   18px;
+    --radius-xl:   22px;
+    --radius-2xl:  28px;
+    --radius-full: 9999px;
+    --radius:      var(--radius-lg);
+
+    /* ===== Motion ===== */
+    --duration-fast:    100ms;
+    --duration-normal:  200ms;
+    --duration-slow:    300ms;
+    --duration-slower:  500ms;
+
+    --ease-out:    cubic-bezier(0, 0, 0.2, 1);
+    --ease-in:     cubic-bezier(0.4, 0, 1, 1);
+    --ease-spring: cubic-bezier(0.5, 1.5, 0.7, 1);
   }
+
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --background:        var(--slate-950);
+    --foreground:        var(--slate-50);
+    --surface:           var(--slate-900);
+    --surface-foreground: var(--slate-50);
+    --surface-muted:     var(--slate-800);
+    --surface-elevated:  var(--slate-800);
+
+    --muted:             var(--slate-800);
+    --muted-foreground:  var(--slate-400);
+
+    --primary:           var(--brand-400);
+    --primary-hover:     var(--brand-300);
+    --primary-foreground: 0 0% 100%;
+
+    --border:            var(--slate-800);
+    --border-strong:     var(--slate-700);
+    --input:             var(--slate-800);
+    --ring:              var(--brand-400);
+
+    --card:              var(--slate-900);
+    --card-foreground:   var(--slate-50);
   }
-  * { @apply border-border; }
-  body { @apply bg-background text-foreground; }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'rlig' 1, 'calt' 1, 'ss01' 1;
+  }
+}
+
+/* ===========================================================
+ * Custom keyframes + utilities
+ * =========================================================== */
+
+@layer utilities {
+  @keyframes shake-x {
+    0%, 100% { transform: translateX(0); }
+    20%      { transform: translateX(-4px); }
+    40%      { transform: translateX(4px); }
+    60%      { transform: translateX(-3px); }
+    80%      { transform: translateX(2px); }
+  }
+
+  @keyframes shimmer {
+    100% { transform: translateX(100%); }
+  }
+
+  .animate-shake-x {
+    animation: shake-x 350ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
+  }
+
+  .skeleton-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent 0,
+      hsl(var(--surface) / 0.7) 50%,
+      transparent 100%
+    );
+    animation: shimmer 1.6s infinite;
+  }
+
+  /* Brand gradient utility — used by primary buttons + hero numbers */
+  .bg-brand-gradient {
+    background: linear-gradient(135deg, hsl(173 84% 35%) 0%, hsl(168 76% 36%) 100%);
+  }
+  .text-brand-gradient {
+    background: linear-gradient(135deg, hsl(173 84% 35%) 0%, hsl(168 76% 36%) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  /* Section title with teal accent bar — Rolly signature */
+  .section-title {
+    @apply flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-primary;
+  }
+  .section-title::before {
+    content: '';
+    width: 3px;
+    height: 14px;
+    background: linear-gradient(135deg, hsl(173 84% 35%) 0%, hsl(168 76% 36%) 100%);
+    border-radius: 2px;
+  }
 }

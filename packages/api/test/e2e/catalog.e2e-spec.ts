@@ -241,11 +241,12 @@ describe('Catalog & GDPR (e2e)', () => {
       expect(res.body.data.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('rejects empty query (must have vin or customer_id)', async () => {
+    it('returns recent vehicles when no filter is given', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/vehicles')
         .set('Authorization', `Bearer ${accessToken}`);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data)).toBe(true);
     });
   });
 });

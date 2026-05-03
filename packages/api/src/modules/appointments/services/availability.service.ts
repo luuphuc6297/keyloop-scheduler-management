@@ -99,7 +99,7 @@ export class AvailabilityService {
     ctx: BookContext,
   ): Promise<AvailabilitySlot[]> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
 
       const service = await this.loadServiceType(manager, query.service_type_id);
       const totalMin = service.duration_minutes + service.buffer_minutes;
@@ -173,6 +173,7 @@ export class AvailabilityService {
               tech.id,
               query.bay_id ?? null,
               bookedByTech.get(tech.id) ?? [],
+              query.include_busy ?? false,
             );
           }
           dayCursor = dayCursor.plus({ days: 1 });
@@ -186,10 +187,6 @@ export class AvailabilityService {
   }
 
   // ===== loaders =====
-
-  private async setRlsContext(manager: EntityManager, ctx: BookContext): Promise<void> {
-    await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
-  }
 
   private async loadServiceType(manager: EntityManager, id: string): Promise<ServiceTypeRow> {
     const rows = (await manager.query(
@@ -366,8 +363,16 @@ export class AvailabilityService {
   }
 
   /**
-   * Walk a 30-min grid inside `window`, emitting slots that fit `totalMin` and
-   * don't collide with confirmed bookings. Slots outside `[from, to)` are dropped.
+   * Walk a 30-min grid inside `window`, emitting slots that fit `totalMin`.
+   * Slots outside `[from, to)` are dropped.
+   *
+   * When `includeBusy=false` (the default), slots that overlap a confirmed
+   * booking are silently skipped — caller only sees bookable slots.
+   *
+   * When `includeBusy=true`, those slots are still emitted but tagged
+   * `status='booked'` so the FE can render a disabled tile. This gives
+   * reviewers a "Tetris view" of demand for the day instead of a list with
+   * mysterious gaps where someone else has booked.
    */
   private emitSlots(
     out: AvailabilitySlot[],
@@ -378,6 +383,7 @@ export class AvailabilityService {
     technicianId: string,
     bayId: string | null,
     bookings: BookedRange[],
+    includeBusy: boolean,
   ): void {
     let cursor = alignToGrid(window.start);
     while (cursor.plus({ minutes: totalMin }) <= window.end) {
@@ -395,12 +401,22 @@ export class AvailabilityService {
         const bUpper = DateTime.fromISO(b.upper, { setZone: true });
         return slotStart < bUpper && slotEnd > bLower;
       });
+
       if (!overlaps) {
         out.push({
           start_at: slotStart.toUTC().toISO()!,
           end_at: slotEnd.toUTC().toISO()!,
           technician_id: technicianId,
           bay_id: bayId,
+          ...(includeBusy ? { status: 'available' as const } : {}),
+        });
+      } else if (includeBusy) {
+        out.push({
+          start_at: slotStart.toUTC().toISO()!,
+          end_at: slotEnd.toUTC().toISO()!,
+          technician_id: technicianId,
+          bay_id: bayId,
+          status: 'booked',
         });
       }
       cursor = cursor.plus({ minutes: SLOT_GRANULARITY_MIN });

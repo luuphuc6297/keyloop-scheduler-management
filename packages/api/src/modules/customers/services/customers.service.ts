@@ -2,6 +2,7 @@ import { ConflictException, Injectable, Logger, NotFoundException } from '@nestj
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { applyRlsContext } from '../../../shared/db/rls-context';
+import { unwrapUpdateRows } from '../../../shared/db/raw-update';
 import { MetricsService } from '../../observability/metrics.service';
 import type {
   CustomerExportResponse,
@@ -35,7 +36,7 @@ export class CustomersService {
 
   async search(query: SearchCustomersQuery, ctx: CustomerContext): Promise<CustomerResponse[]> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
 
       const wheres: string[] = ['dealership_id = $1', 'anonymized_at IS NULL'];
       const params: unknown[] = [ctx.dealershipId];
@@ -64,7 +65,7 @@ export class CustomersService {
 
   async findById(id: string, ctx: CustomerContext): Promise<CustomerResponse> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
       const row = await this.loadCustomer(manager, id);
       return toResponse(row);
     });
@@ -72,7 +73,7 @@ export class CustomersService {
 
   async anonymize(id: string, reason: string, ctx: CustomerContext): Promise<CustomerResponse> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
       const row = await this.loadCustomer(manager, id);
       if (row.anonymized_at) {
         throw new ConflictException({
@@ -80,7 +81,9 @@ export class CustomersService {
           message: 'Customer has already been anonymized',
         });
       }
-      const updated = (await manager.query(
+      // NOTE: TypeORM 0.3.x wraps UPDATE...RETURNING as [rows, rowCount].
+      // See shared/db/raw-update.ts for context.
+      const raw = await manager.query(
         `UPDATE customer
             SET first_name = 'REDACTED',
                 last_name = 'REDACTED',
@@ -92,7 +95,8 @@ export class CustomersService {
           RETURNING id, first_name, last_name, email::text AS email,
                     phone, anonymized_at, created_at`,
         [id, reason],
-      )) as CustomerRow[];
+      );
+      const updated = unwrapUpdateRows<CustomerRow>(raw);
 
       // Outbox event so downstream systems can purge derived data
       await manager.query(
@@ -110,7 +114,7 @@ export class CustomersService {
 
   async exportData(id: string, ctx: CustomerContext): Promise<CustomerExportResponse> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
       const row = await this.loadCustomer(manager, id);
 
       const vehicles = (await manager.query(
@@ -155,10 +159,6 @@ export class CustomersService {
         })),
       };
     });
-  }
-
-  private async setRlsContext(manager: EntityManager, ctx: CustomerContext): Promise<void> {
-    await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
   }
 
   private async loadCustomer(manager: EntityManager, id: string): Promise<CustomerRow> {

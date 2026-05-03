@@ -3,7 +3,9 @@ import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
-const PUBLIC_PATH_PREFIXES = ['/health/', '/metrics', '/api/docs'];
+// `/metrics` is registered by the @willsoto/nestjs-prometheus library; we
+// can't decorate that controller with @Public(). Single-path escape hatch.
+const LIBRARY_PUBLIC_PATHS = ['/metrics'];
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -19,8 +21,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     if (isPublic) return true;
 
     const req = context.switchToHttp().getRequest<{ url?: string }>();
-    const url = req.url ?? '';
-    if (PUBLIC_PATH_PREFIXES.some((p) => url.startsWith(p))) return true;
+    if (LIBRARY_PUBLIC_PATHS.includes(req.url ?? '')) return true;
 
     return super.canActivate(context);
   }

@@ -1,20 +1,24 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 import { ApiClientError } from '@/lib/api';
+import { lookupErrorFromResponse } from '@/lib/error-messages';
 import {
   useAvailability,
   useBays,
   useBookAppointment,
-  useCustomers,
   useServiceTypes,
   useTechnicians,
   useVehiclesByCustomer,
 } from '@/lib/queries';
-import { formatSlot } from '@/lib/format';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CustomerCombobox } from '@/components/customer-combobox';
+import { SlotPicker } from '@/components/slot-picker';
 import {
   Dialog,
   DialogContent,
@@ -34,19 +38,55 @@ export function BookingDialog({ open, timezone, onClose }: Props) {
   const [serviceTypeId, setServiceTypeId] = useState<string>('');
   const [technicianId, setTechnicianId] = useState<string>('');
   const [bayId, setBayId] = useState<string>('');
-  const [customerSearch, setCustomerSearch] = useState('');
-  const [customerId, setCustomerId] = useState<string>('');
+  const [customer, setCustomer] = useState<{
+    id: string;
+    first_name: string;
+    last_name: string;
+    email: string | null;
+  } | null>(null);
   const [vehicleId, setVehicleId] = useState<string>('');
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReturnType<typeof lookupErrorFromResponse> | null>(null);
+  const [shakeKey, setShakeKey] = useState(0);
 
+  const customerId = customer?.id ?? '';
   const serviceTypes = useServiceTypes();
   const technicians = useTechnicians();
   const bays = useBays();
-  const customers = useCustomers(customerSearch);
   const vehicles = useVehiclesByCustomer(customerId || null);
 
-  // Default search window: today 06:00 → +14 days at the dealership tz
+  // Clear server-side error when user changes any selection — prevents stale
+  // alerts (e.g. "Skill mismatch" from a prior attempt persisting after the
+  // user switched to a different service or technician).
+  useEffect(() => {
+    if (error) setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceTypeId, technicianId, bayId, customerId, vehicleId, selectedSlot]);
+
+  // Client-side hint: if the chosen technician doesn't have the skill the
+  // chosen service requires, surface it inline BEFORE the user clicks Book.
+  // The server still enforces it, but pre-flighting avoids round-trips.
+  const skillHint = useMemo(() => {
+    if (!serviceTypeId || !technicianId) return null;
+    const svc = serviceTypes.data?.find((s) => s.id === serviceTypeId);
+    if (!svc?.required_skill_id) return null;
+    const tech = technicians.data?.find((t) => t.id === technicianId);
+    if (!tech) return null;
+    // technician.skills is array of skill *codes*, service.required_skill_id is a UUID.
+    // We don't have the skill UUID→code map on the FE, so we check by NAME match
+    // via the service's required_skill_id field. The simplest signal we DO have:
+    // if the service has a required_skill_id and the tech's skills array is empty
+    // or doesn't intersect by code-prefix, warn.
+    // For the demo seed: services need OIL_CHANGE / BRAKES / TIRE codes.
+    const serviceCodeHint = svc.name.toLowerCase();
+    const techCodes = tech.skills.map((s) => s.toLowerCase());
+    const matches = techCodes.some((code) => serviceCodeHint.includes(code.replace('_', ' ')));
+    return matches ? null : {
+      title: 'Heads up — possible skill mismatch',
+      detail: `${tech.first_name} ${tech.last_name}'s certified skills (${tech.skills.join(', ')}) may not cover "${svc.name}". You can still try; the server will confirm.`,
+    };
+  }, [serviceTypeId, technicianId, serviceTypes.data, technicians.data]);
+
   const window = useMemo(() => {
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -64,7 +104,7 @@ export function BookingDialog({ open, timezone, onClose }: Props) {
 
   const book = useBookAppointment();
   const canSubmit =
-    serviceTypeId && technicianId && bayId && customerId && vehicleId && selectedSlot && !book.isPending;
+    !!serviceTypeId && !!technicianId && !!bayId && !!customerId && !!vehicleId && !!selectedSlot && !book.isPending;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -79,14 +119,23 @@ export function BookingDialog({ open, timezone, onClose }: Props) {
         technician_id: technicianId,
         bay_id: bayId,
       });
+      toast.success('Appointment booked');
       reset();
       onClose();
     } catch (err) {
       if (err instanceof ApiClientError) {
-        const code = err.body.code ?? err.status;
-        setError(`${code}: ${err.body.message ?? err.message}`);
+        // eslint-disable-next-line no-console
+        console.warn('[booking] API rejected the request', {
+          status: err.status,
+          body: err.body,
+          sentSlot: selectedSlot,
+        });
+        setError(lookupErrorFromResponse(err));
+        setShakeKey((k) => k + 1);
       } else {
-        setError((err as Error).message);
+        // eslint-disable-next-line no-console
+        console.error('[booking] non-API error', err);
+        setError({ title: 'Booking failed', detail: (err as Error).message, variant: 'error' });
       }
     }
   }
@@ -95,8 +144,7 @@ export function BookingDialog({ open, timezone, onClose }: Props) {
     setServiceTypeId('');
     setTechnicianId('');
     setBayId('');
-    setCustomerSearch('');
-    setCustomerId('');
+    setCustomer(null);
     setVehicleId('');
     setSelectedSlot(null);
     setError(null);
@@ -117,7 +165,7 @@ export function BookingDialog({ open, timezone, onClose }: Props) {
           <DialogTitle>Book appointment</DialogTitle>
           <DialogDescription>
             Pick a service, technician, and an available slot. Submission sends an{' '}
-            <code>Idempotency-Key</code> so retries are safe.
+            <code className="font-mono">Idempotency-Key</code> so retries are safe.
           </DialogDescription>
         </DialogHeader>
 
@@ -125,145 +173,143 @@ export function BookingDialog({ open, timezone, onClose }: Props) {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="service-type">Service</Label>
-              <select
-                id="service-type"
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              <Select
                 value={serviceTypeId}
-                onChange={(e) => {
-                  setServiceTypeId(e.target.value);
+                onValueChange={(v) => {
+                  setServiceTypeId(v);
                   setSelectedSlot(null);
                 }}
               >
-                <option value="">Select…</option>
-                {serviceTypes.data?.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.duration_minutes}m + {s.buffer_minutes}m buffer)
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="service-type">
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {serviceTypes.data?.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name} ({s.duration_minutes}m + {s.buffer_minutes}m buffer)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="technician">Technician</Label>
-              <select
-                id="technician"
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              <Select
                 value={technicianId}
-                onChange={(e) => {
-                  setTechnicianId(e.target.value);
+                onValueChange={(v) => {
+                  setTechnicianId(v);
                   setSelectedSlot(null);
                 }}
               >
-                <option value="">Any qualified</option>
-                {technicians.data?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.first_name} {t.last_name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="technician">
+                  <SelectValue placeholder="Any qualified" />
+                </SelectTrigger>
+                <SelectContent>
+                  {technicians.data?.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.first_name} {t.last_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="bay">Bay</Label>
-              <select
-                id="bay"
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                value={bayId}
-                onChange={(e) => setBayId(e.target.value)}
-              >
-                <option value="">Select…</option>
-                {bays.data?.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
+              <Select value={bayId} onValueChange={setBayId}>
+                <SelectTrigger id="bay">
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bays.data?.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="customer-search">Customer search</Label>
-              <Input
-                id="customer-search"
-                placeholder="Type name or email…"
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
+              <Label>Customer</Label>
+              <CustomerCombobox
+                value={customer}
+                onChange={(c) => {
+                  setCustomer(c);
+                  setVehicleId('');
+                }}
               />
-              {customers.data && customers.data.length > 0 ? (
-                <div className="max-h-32 overflow-y-auto rounded-md border text-sm">
-                  {customers.data.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => {
-                        setCustomerId(c.id);
-                        setCustomerSearch(`${c.first_name} ${c.last_name}`);
-                        setVehicleId('');
-                      }}
-                      className={`block w-full px-3 py-1.5 text-left hover:bg-muted ${
-                        customerId === c.id ? 'bg-muted font-medium' : ''
-                      }`}
-                    >
-                      {c.first_name} {c.last_name}{' '}
-                      <span className="text-muted-foreground">— {c.email}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </div>
 
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="vehicle">Vehicle</Label>
-              <select
-                id="vehicle"
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                value={vehicleId}
-                disabled={!customerId}
-                onChange={(e) => setVehicleId(e.target.value)}
-              >
-                <option value="">{customerId ? 'Select…' : 'Pick a customer first'}</option>
-                {vehicles.data?.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.year} {v.make} {v.model} — VIN {v.vin}
-                  </option>
-                ))}
-              </select>
+              <Select value={vehicleId} onValueChange={setVehicleId} disabled={!customerId}>
+                <SelectTrigger id="vehicle">
+                  <SelectValue placeholder={customerId ? 'Select…' : 'Pick a customer first'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {vehicles.data?.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      {v.year} {v.make} {v.model} — VIN {v.vin}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label>Available slots</Label>
+            <div className="flex items-center justify-between">
+              <Label>Available slots</Label>
+              <span className="text-xs text-muted-foreground">{timezone}</span>
+            </div>
             {!serviceTypeId ? (
-              <p className="text-sm text-muted-foreground">Select a service to see available times.</p>
-            ) : availability.isLoading ? (
-              <p className="text-sm text-muted-foreground">Loading availability…</p>
-            ) : availability.data?.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No slots in this 14-day window.</p>
-            ) : (
-              <div className="grid max-h-48 grid-cols-2 gap-2 overflow-y-auto rounded-md border p-2 sm:grid-cols-3">
-                {availability.data?.slice(0, 60).map((slot) => {
-                  const isSelected = selectedSlot === slot.start_at;
-                  return (
-                    <button
-                      key={slot.start_at + slot.technician_id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedSlot(slot.start_at);
-                        if (!technicianId) setTechnicianId(slot.technician_id);
-                      }}
-                      className={`rounded-md border px-2 py-1.5 text-left text-xs transition ${
-                        isSelected ? 'border-primary bg-primary/10' : 'hover:bg-muted'
-                      }`}
-                    >
-                      {formatSlot(slot.start_at, timezone)}
-                    </button>
-                  );
-                })}
+              <div className="rounded-xl border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                Select a service to see available times.
               </div>
+            ) : (
+              <SlotPicker
+                slots={availability.data ?? []}
+                selectedStartAt={selectedSlot}
+                timezone={timezone}
+                loading={availability.isLoading}
+                emptyMessage="No open slots in the next 14 days for this technician + service."
+                onSelect={(startAt) => {
+                  setSelectedSlot(startAt);
+                  // Surface the technician of the picked slot if the user hadn't
+                  // chosen one explicitly — keeps "Any qualified" mode workable.
+                  if (!technicianId) {
+                    const match = availability.data?.find((s) => s.start_at === startAt);
+                    if (match) setTechnicianId(match.technician_id);
+                  }
+                }}
+              />
             )}
           </div>
 
+          {/* Error from a real (server-side) book attempt — clears on next selection */}
           {error ? (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+            <motion.div
+              key={shakeKey}
+              animate={{ x: [0, -4, 4, -3, 2, 0] }}
+              transition={{ duration: 0.35, ease: [0.36, 0.07, 0.19, 0.97] }}
+            >
+              <Alert
+                variant={
+                  error.variant === 'info' ? 'info' : error.variant === 'warning' ? 'warning' : 'danger'
+                }
+              >
+                <AlertTitle>{error.title}</AlertTitle>
+                <AlertDescription>{error.detail}</AlertDescription>
+              </Alert>
+            </motion.div>
+          ) : skillHint ? (
+            // Pre-flight hint — informational, not blocking
+            <Alert variant="info">
+              <AlertTitle>{skillHint.title}</AlertTitle>
+              <AlertDescription>{skillHint.detail}</AlertDescription>
+            </Alert>
           ) : null}
 
           <DialogFooter>

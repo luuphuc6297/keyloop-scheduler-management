@@ -23,11 +23,27 @@
 import http from 'k6/http';
 import { check, group, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
-import { ulid } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
+
+// Minimal unique-id generator (k6-utils doesn't export ulid). Format
+// doesn't matter for Idempotency-Key — only uniqueness across the run.
+function uniqueId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${__VU}-${__ITER}`;
+}
+
+// Defensive JSON.parse — k6 response bodies can be empty / non-JSON when the
+// upstream returns an error page or 0-status (network failure).
+function safeJson(body) {
+  if (!body) return {};
+  try {
+    return JSON.parse(body);
+  } catch {
+    return {};
+  }
+}
 
 const API_BASE = __ENV.API_BASE || 'http://localhost:3001';
-const API_EMAIL = __ENV.API_EMAIL || 'lifecycle-test@example.com';
-const API_PASSWORD = __ENV.API_PASSWORD || 'CorrectHorseBatteryStaple!';
+const API_EMAIL = __ENV.API_EMAIL || 'admin@nyc-auto.local';
+const API_PASSWORD = __ENV.API_PASSWORD || 'Demo1234!';
 
 // Each iteration of the test is a "wave" — all 30 VUs race at the same time.
 // We use a small stagger plus a barrier to maximize true concurrency.
@@ -45,10 +61,9 @@ export const options = {
     bookings_won: ['count==1'],
     // Everyone else should hit a recognized 409
     bookings_lost: ['count==29'],
-    // Losers fail fast — p99 under 250ms
-    'http_req_duration{outcome:lost}': ['p(99)<250'],
-    // Winners are also fast — p99 under 500ms (one tx commits, audit + outbox written)
-    'http_req_duration{outcome:won}': ['p(99)<500'],
+    // Use our custom Trends instead of the http_req_duration tag filter
+    booking_won_latency: ['p(99)<500'],
+    booking_lost_latency: ['p(99)<250'],
   },
 };
 
@@ -60,6 +75,19 @@ const lossLatency = new Trend('booking_lost_latency');
 
 let cachedFixture = null;
 
+function fetchJson(label, res) {
+  if (res.status !== 200) {
+    throw new Error(
+      `${label}: HTTP ${res.status} — ${(res.body || '').toString().slice(0, 200)}`,
+    );
+  }
+  try {
+    return JSON.parse(res.body);
+  } catch (err) {
+    throw new Error(`${label}: invalid JSON — ${(res.body || '').toString().slice(0, 200)}`);
+  }
+}
+
 export function setup() {
   // 1. Login once
   const loginRes = http.post(
@@ -67,41 +95,71 @@ export function setup() {
     JSON.stringify({ email: API_EMAIL, password: API_PASSWORD }),
     { headers: { 'content-type': 'application/json' } },
   );
-  check(loginRes, { 'login OK': (r) => r.status === 200 });
+  if (loginRes.status !== 200) {
+    throw new Error(
+      `Login failed (${loginRes.status}). Run the dev seed (pnpm --filter @keyloop/api seed:dev) ` +
+        `and pass the right creds: API_EMAIL=admin@nyc-auto.local API_PASSWORD='Demo1234!' k6 run ...`,
+    );
+  }
   const accessToken = JSON.parse(loginRes.body).accessToken;
 
-  // 2. Fetch catalog
+  // 2. Fetch catalog. Empty `q` returns the dealership's recent customers.
   const headers = { authorization: `Bearer ${accessToken}` };
-  const services = JSON.parse(
-    http.get(`${API_BASE}/api/v1/dealerships/me/service-types`, { headers }).body,
+  const services = fetchJson(
+    'service-types',
+    http.get(`${API_BASE}/api/v1/dealerships/me/service-types`, { headers }),
   ).data;
-  const technicians = JSON.parse(
-    http.get(`${API_BASE}/api/v1/dealerships/me/technicians`, { headers }).body,
+  const technicians = fetchJson(
+    'technicians',
+    http.get(`${API_BASE}/api/v1/dealerships/me/technicians`, { headers }),
   ).data;
-  const bays = JSON.parse(http.get(`${API_BASE}/api/v1/dealerships/me/bays`, { headers }).body).data;
-  const customers = JSON.parse(
-    http.get(`${API_BASE}/api/v1/customers?q=Lifecycle`, { headers }).body,
+  const bays = fetchJson('bays', http.get(`${API_BASE}/api/v1/dealerships/me/bays`, { headers })).data;
+  const customers = fetchJson(
+    'customers',
+    http.get(`${API_BASE}/api/v1/customers?limit=20`, { headers }),
   ).data;
+  if (!customers || customers.length === 0) {
+    throw new Error('No customers found. Run the dev seed first: pnpm --filter @keyloop/api seed:dev');
+  }
   const customer = customers[0];
-  const vehicles = JSON.parse(
-    http.get(`${API_BASE}/api/v1/vehicles?customer_id=${customer.id}`, { headers }).body,
+  const vehicles = fetchJson(
+    'vehicles',
+    http.get(`${API_BASE}/api/v1/vehicles?customer_id=${customer.id}`, { headers }),
   ).data;
 
-  if (!services[0] || !technicians[0] || !bays[0] || !customer || !vehicles[0]) {
-    throw new Error('Run pnpm seed:dev and the lifecycle e2e test first to seed fixtures');
+  if (!services[0] || !technicians[0] || !bays[0] || !vehicles[0]) {
+    throw new Error('Seed incomplete. Run: pnpm --filter @keyloop/api seed:dev');
   }
 
-  // 3. Pick a slot far in the future to avoid colliding with prior runs
+  // Pick a service that ALL technicians can perform (no skill mismatch).
+  // Oil Change is in the seed; every technician has OIL_CHANGE skill.
+  const oilChange = services.find((s) => s.name === 'Oil Change') || services[0];
+
+  // 3. Pick a UNIQUE slot per run.
+  //    Construct the ISO with EXPLICIT America/New_York offset (-05:00) so
+  //    the API parses 14:00 *NY local* — not 14:00 in whatever timezone the
+  //    box running k6 is in. (Without this, a Vietnam-based machine sends
+  //    14:00 ICT = 03:00 EST → fails OUTSIDE_BUSINESS_HOURS for all 30 VUs.)
   const now = new Date();
-  const start = new Date(now.getFullYear() + 1, 0, 15, 14, 0, 0); // Jan 15 next year, 14:00 local
+  const future = new Date(now.getFullYear() + 1, 0, 1);
+  future.setDate(future.getDate() + Math.floor(Math.random() * 250));
+  while (future.getUTCDay() !== 3) future.setDate(future.getDate() + 1); // Wednesday
+  const yy = future.getUTCFullYear();
+  const mm = String(future.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(future.getUTCDate()).padStart(2, '0');
+  // 14:00 EST → 19:00 UTC. EST is dealership winter time; in summer (EDT)
+  // this becomes 15:00 NY local — still inside business hours (8-18).
+  const startAtIso = `${yy}-${mm}-${dd}T14:00:00-05:00`;
+
+  console.log(`Contention slot: ${startAtIso}`);
 
   return {
     accessToken,
     payload: {
-      start_at: start.toISOString(),
+      start_at: startAtIso,
       customer_id: customer.id,
       vehicle_id: vehicles[0].id,
-      service_type_id: services[0].id,
+      service_type_id: oilChange.id,
       technician_id: technicians[0].id,
       bay_id: bays[0].id,
     },
@@ -112,7 +170,7 @@ export default function (data) {
   const headers = {
     'content-type': 'application/json',
     authorization: `Bearer ${data.accessToken}`,
-    'idempotency-key': ulid(),
+    'idempotency-key': uniqueId(),
   };
 
   // Stagger barrier — each VU waits until the next 500ms boundary so they all
@@ -131,29 +189,22 @@ export default function (data) {
     if (res.status === 201) {
       wonCounter.add(1);
       winLatency.add(res.timings.duration);
-      res.tags.outcome = 'won';
+      const winnerBody = safeJson(res.body);
       check(res, {
-        'winner returns version 1': (r) => JSON.parse(r.body).version === 1,
-        'winner returns confirmed': (r) => JSON.parse(r.body).status === 'confirmed',
+        'winner returns version 1': () => winnerBody.version === 1,
+        'winner returns confirmed': () => winnerBody.status === 'confirmed',
       });
     } else if (res.status === 409) {
       lostCounter.add(1);
       lossLatency.add(res.timings.duration);
-      res.tags.outcome = 'lost';
-      const body = (() => {
-        try {
-          return JSON.parse(res.body);
-        } catch {
-          return {};
-        }
-      })();
+      const body = safeJson(res.body);
       check(res, {
         'loser has known conflict code': () =>
           ['BAY_UNAVAILABLE', 'TECHNICIAN_UNAVAILABLE', 'BOOKING_CONFLICT'].includes(body.code),
       });
     } else {
       unexpectedCounter.add(1);
-      console.error(`unexpected status ${res.status}: ${res.body}`);
+      console.error(`unexpected status ${res.status}: ${(res.body || '').toString().slice(0, 300)}`);
     }
   });
 }

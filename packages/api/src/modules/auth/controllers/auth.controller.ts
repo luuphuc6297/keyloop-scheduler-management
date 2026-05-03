@@ -20,8 +20,9 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  // 5 attempts per IP per 15 min — credential stuffing defense (spec §7.7)
-  @Throttle({ login: { ttl: 15 * 60_000, limit: 5 } })
+  // 5 attempts per IP per 15 min — credential stuffing defense (spec §7.7).
+  // Overrides the global short/medium tiers for this route only.
+  @Throttle({ default: { ttl: 15 * 60_000, limit: 5 } })
   async login(
     @Body(new ZodValidationPipe(LoginSchema)) dto: LoginDto,
     @Headers('user-agent') userAgent: string | undefined,
@@ -34,7 +35,7 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   // 10 attempts per IP per 5 min — token-replay/abuse defense
-  @Throttle({ refresh: { ttl: 5 * 60_000, limit: 10 } })
+  @Throttle({ default: { ttl: 5 * 60_000, limit: 10 } })
   async refresh(
     @Body(new ZodValidationPipe(RefreshSchema)) dto: RefreshDto,
     @Headers('user-agent') userAgent: string | undefined,

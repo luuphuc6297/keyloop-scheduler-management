@@ -1,9 +1,10 @@
 import { SearchVehiclesSchema } from './vehicle.schema';
 
 describe('SearchVehiclesSchema', () => {
-  it('requires either vin or customer_id', () => {
+  it('accepts empty query (returns recent vehicles)', () => {
     const res = SearchVehiclesSchema.safeParse({});
-    expect(res.success).toBe(false);
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.limit).toBe(20);
   });
 
   it('accepts vin alone', () => {

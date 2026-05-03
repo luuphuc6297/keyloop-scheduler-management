@@ -1,9 +1,9 @@
 import { Controller, Get, Header, UseGuards } from '@nestjs/common';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Tenant, type TenantContext } from '../../auth/decorators/tenant-context.decorator';
+
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import type { AuthContext } from '../../auth/types/auth-context';
 import {
   DealershipsService,
   type BayResponse,
@@ -20,20 +20,17 @@ export class DealershipsController {
 
   @Get()
   @Roles('service_advisor', 'manager', 'technician')
-  async me(@CurrentUser() user: AuthContext): Promise<DealershipResponse> {
-    return this.svc.findMe({ userId: user.id, dealershipId: user.dealershipId });
+  async me(@Tenant() ctx: TenantContext): Promise<DealershipResponse> {
+    return this.svc.findMe(ctx);
   }
 
   @Get('service-types')
   @Roles('service_advisor', 'manager', 'technician')
   @Header('Cache-Control', 'private, max-age=300')
   async serviceTypes(
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ): Promise<{ data: ServiceTypeResponse[] }> {
-    const data = await this.svc.listServiceTypes({
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const data = await this.svc.listServiceTypes(ctx);
     return { data };
   }
 
@@ -41,33 +38,24 @@ export class DealershipsController {
   @Roles('service_advisor', 'manager', 'technician')
   @Header('Cache-Control', 'private, max-age=300')
   async technicians(
-    @CurrentUser() user: AuthContext,
+    @Tenant() ctx: TenantContext,
   ): Promise<{ data: TechnicianResponse[] }> {
-    const data = await this.svc.listTechnicians({
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+    const data = await this.svc.listTechnicians(ctx);
     return { data };
   }
 
   @Get('bays')
   @Roles('service_advisor', 'manager', 'technician')
   @Header('Cache-Control', 'private, max-age=300')
-  async bays(@CurrentUser() user: AuthContext): Promise<{ data: BayResponse[] }> {
-    const data = await this.svc.listBays({
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+  async bays(@Tenant() ctx: TenantContext): Promise<{ data: BayResponse[] }> {
+    const data = await this.svc.listBays(ctx);
     return { data };
   }
 
   @Get('business-hours')
   @Roles('service_advisor', 'manager', 'technician')
   @Header('Cache-Control', 'private, max-age=300')
-  async businessHours(@CurrentUser() user: AuthContext): Promise<BusinessHoursResponse> {
-    return this.svc.getBusinessHours({
-      userId: user.id,
-      dealershipId: user.dealershipId,
-    });
+  async businessHours(@Tenant() ctx: TenantContext): Promise<BusinessHoursResponse> {
+    return this.svc.getBusinessHours(ctx);
   }
 }

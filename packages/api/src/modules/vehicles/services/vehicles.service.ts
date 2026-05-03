@@ -26,7 +26,7 @@ export class VehiclesService {
 
   async search(query: SearchVehiclesQuery, ctx: VehicleContext): Promise<VehicleResponse[]> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
       const wheres: string[] = ['dealership_id = $1'];
       const params: unknown[] = [ctx.dealershipId];
       if (query.vin) {
@@ -51,9 +51,6 @@ export class VehiclesService {
     });
   }
 
-  private async setRlsContext(manager: EntityManager, ctx: VehicleContext): Promise<void> {
-    await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
-  }
 }
 
 function toResponse(row: VehicleRow): VehicleResponse {

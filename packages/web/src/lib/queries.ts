@@ -93,12 +93,19 @@ export function useBays() {
   });
 }
 
-export function useCustomers(query: string) {
+export function useCustomers(query: string, options?: { allowEmpty?: boolean }) {
+  const allowEmpty = options?.allowEmpty ?? false;
   return useQuery({
-    queryKey: ['customers', { q: query }],
+    queryKey: ['customers', { q: query, allowEmpty }],
     queryFn: async () =>
-      (await apiFetch<{ data: Customer[] }>('/api/v1/customers', { query: { q: query, limit: 20 } })).data,
-    enabled: query.length >= 2,
+      (
+        await apiFetch<{ data: Customer[] }>('/api/v1/customers', {
+          query: query.length > 0 ? { q: query, limit: 50 } : { limit: 50 },
+        })
+      ).data,
+    // Booking dialog passes default (no allowEmpty) → only fetches when typing.
+    // Customers page passes { allowEmpty: true } → fetches the full list on load.
+    enabled: allowEmpty || query.length >= 2,
   });
 }
 
@@ -142,9 +149,16 @@ export function useAvailability(params: {
   technician_id?: string;
   from: string;
   to: string;
+  /**
+   * When true, server also returns busy slots (`status='booked'`) inside
+   * working hours — used by SlotPicker to render disabled tiles for conflicts
+   * so reviewers see demand at a glance. Defaults to true.
+   */
+  include_busy?: boolean;
 }) {
+  const includeBusy = params.include_busy ?? true;
   return useQuery({
-    queryKey: ['availability', params],
+    queryKey: ['availability', { ...params, include_busy: includeBusy }],
     queryFn: async () =>
       (
         await apiFetch<{ data: AvailabilitySlot[] }>('/api/v1/appointments/availability', {
@@ -153,6 +167,7 @@ export function useAvailability(params: {
             technician_id: params.technician_id,
             from: params.from,
             to: params.to,
+            include_busy: includeBusy ? 'true' : undefined,
           },
         })
       ).data,
@@ -204,5 +219,89 @@ export function useCancelAppointment() {
       qc.invalidateQueries({ queryKey: ['appointments'] });
       qc.invalidateQueries({ queryKey: ['availability'] });
     },
+  });
+}
+
+// ===== detail / history =====
+
+export function useAppointment(id: string | null) {
+  return useQuery({
+    queryKey: ['appointments', 'detail', id],
+    queryFn: () => apiFetch<Appointment>(`/api/v1/appointments/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+export interface AppointmentHistoryEntry {
+  id: string;
+  field: string;
+  old_value: unknown;
+  new_value: unknown;
+  changed_by: string;
+  changed_at: string;
+  reason: string | null;
+}
+
+export function useAppointmentHistory(id: string | null) {
+  return useQuery({
+    queryKey: ['appointments', 'history', id],
+    queryFn: async () =>
+      (await apiFetch<{ data: AppointmentHistoryEntry[] }>(`/api/v1/appointments/${id}/history`)).data,
+    enabled: Boolean(id),
+  });
+}
+
+export function useCustomer(id: string | null) {
+  return useQuery({
+    queryKey: ['customers', 'detail', id],
+    queryFn: () => apiFetch<Customer>(`/api/v1/customers/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+export function useAnonymizeCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { id: string; reason: string }) =>
+      apiFetch<Customer>(`/api/v1/customers/${params.id}`, {
+        method: 'DELETE',
+        body: { reason: params.reason },
+      }),
+    onSuccess: (_, params) => {
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      qc.invalidateQueries({ queryKey: ['customers', 'detail', params.id] });
+    },
+  });
+}
+
+export interface BusinessHours {
+  hours: Array<{ day_of_week: number; open_time: string; close_time: string }>;
+  exceptions: Array<{
+    date: string;
+    is_closed: boolean;
+    override_open: string | null;
+    override_close: string | null;
+    reason: string | null;
+  }>;
+}
+
+export function useBusinessHours() {
+  return useQuery({
+    queryKey: ['catalog', 'business-hours'],
+    queryFn: () => apiFetch<BusinessHours>('/api/v1/dealerships/me/business-hours'),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useVehicleSearch(vin: string) {
+  return useQuery({
+    queryKey: ['vehicles', { vin }],
+    queryFn: async () =>
+      (
+        await apiFetch<{ data: import('./types').Vehicle[] }>('/api/v1/vehicles', {
+          // Empty `vin` returns the recent list (API now allows it).
+          query: vin.length > 0 ? { vin, limit: 50 } : { limit: 50 },
+        })
+      ).data,
   });
 }

@@ -59,7 +59,9 @@ export class AuthService {
           const until = new Date(Date.now() + LOCKOUT_DURATION_MINUTES * 60_000);
           await this.users.update(user.id, { lockedUntil: until });
           this.metrics.accountsLockedTotal.inc();
-          this.logger.warn(`Account locked: ${dto.email} until ${until.toISOString()}`);
+          this.logger.warn(
+            `Account locked: email_hash=${sha256(dto.email).slice(0, 12)} until ${until.toISOString()}`,
+          );
         }
       }
       this.metrics.authLoginAttemptsTotal.labels({ outcome: 'invalid_credentials' }).inc();
@@ -78,7 +80,9 @@ export class AuthService {
     if (stored?.revokedAt) {
       await this.refreshTokens.update({ familyId: stored.familyId }, { revokedAt: new Date() });
       this.metrics.authRefreshTokenReuseTotal.inc();
-      this.logger.warn(`Refresh token reuse detected for family ${stored.familyId}, user ${stored.userId}`);
+      this.logger.warn(
+        `Refresh token reuse detected family_id=${stored.familyId} user_id_hash=${sha256(stored.userId).slice(0, 12)}`,
+      );
       throw new UnauthorizedException({ code: 'TOKEN_REVOKED', message: 'Token revoked' });
     }
 

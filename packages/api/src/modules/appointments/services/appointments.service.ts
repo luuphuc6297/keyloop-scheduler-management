@@ -2,19 +2,22 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   PreconditionFailedException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { applyRlsContext } from '../../../shared/db/rls-context';
+import { unwrapUpdateRows } from '../../../shared/db/raw-update';
 import { MetricsService } from '../../observability/metrics.service';
 import {
   computeTimeRange,
   InvalidLocalTimeError,
   type ComputedTimeRange,
 } from '../domain/compute-time-range';
+import { parseTstzrange, extractLowerBound } from '../domain/parse-time-range';
 import {
   BookingValidationError,
   validateBusinessHours,
@@ -29,6 +32,9 @@ import {
   type ListAppointmentsQuery,
 } from '../dtos/list-appointments.schema';
 import type { RescheduleAppointmentDto } from '../dtos/reschedule-appointment.schema';
+import { AppointmentHistoryRecorder } from './appointment-history-recorder';
+import { DbErrorTranslator } from './db-error-translator';
+import { OutboxEmitter } from './outbox-emitter';
 
 interface BookContext {
   userId: string;
@@ -85,6 +91,9 @@ export class AppointmentsService {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly metrics: MetricsService,
+    private readonly historyRecorder: AppointmentHistoryRecorder,
+    private readonly outbox: OutboxEmitter,
+    private readonly dbErrors: DbErrorTranslator,
   ) {}
 
   // ===== CREATE =====
@@ -100,7 +109,7 @@ export class AppointmentsService {
 
   private async bookInner(dto: BookAppointmentDto, ctx: BookContext): Promise<AppointmentResponse> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, ctx);
 
       const dealership = await this.loadDealership(manager, ctx.dealershipId);
       const service = await this.loadServiceType(manager, dto.service_type_id);
@@ -115,45 +124,58 @@ export class AppointmentsService {
         service.required_skill_id,
       );
 
-      try {
-        const inserted = (await manager.query(
-          `INSERT INTO appointment
-            (dealership_id, customer_id, vehicle_id, service_type_id,
-             technician_id, bay_id, time_range, status, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::tstzrange, 'confirmed', $8)
-           RETURNING *`,
-          [
-            ctx.dealershipId,
-            dto.customer_id,
-            dto.vehicle_id,
-            dto.service_type_id,
-            dto.technician_id,
-            dto.bay_id,
-            range.literal,
-            ctx.userId,
-          ],
-        )) as AppointmentRow[];
+      const row = await this.insertAppointment(manager, dto, range, ctx);
 
-        const row = inserted[0];
-        if (!row) throw new Error('No row returned from INSERT');
+      const response = toResponse(row);
+      await this.historyRecorder.record(manager, row, ctx, 'created', null, response);
+      await this.outbox.emit(manager, 'appointment', row.id, 'appointment.confirmed', response, ctx);
 
-        await this.recordHistory(manager, row, ctx, 'created', null, toResponse(row));
-        await this.publishOutbox(manager, row, ctx, 'appointment.confirmed');
-
-        this.metrics.appointmentsCreatedTotal.labels({ dealership_id: ctx.dealershipId }).inc();
-        this.logger.log(`appointment.booked id=${row.id} dealership=${ctx.dealershipId}`);
-        return toResponse(row);
-      } catch (err) {
-        throw this.translateDbError(err);
-      }
+      this.metrics.appointmentsCreatedTotal.labels({ dealership_id: ctx.dealershipId }).inc();
+      this.logger.log(`appointment.booked id=${row.id} dealership=${ctx.dealershipId}`);
+      return response;
     });
+  }
+
+  private async insertAppointment(
+    manager: EntityManager,
+    dto: BookAppointmentDto,
+    range: ComputedTimeRange,
+    ctx: BookContext,
+  ): Promise<AppointmentRow> {
+    try {
+      const inserted = (await manager.query(
+        `INSERT INTO appointment
+          (dealership_id, customer_id, vehicle_id, service_type_id,
+           technician_id, bay_id, time_range, status, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::tstzrange, 'confirmed', $8)
+         RETURNING *`,
+        [
+          ctx.dealershipId,
+          dto.customer_id,
+          dto.vehicle_id,
+          dto.service_type_id,
+          dto.technician_id,
+          dto.bay_id,
+          range.literal,
+          ctx.userId,
+        ],
+      )) as AppointmentRow[];
+
+      const row = inserted[0];
+      if (!row) {
+        throw new InternalServerErrorException({ code: 'INSERT_RETURNED_NO_ROW' });
+      }
+      return row;
+    } catch (err) {
+      throw this.dbErrors.translate(err);
+    }
   }
 
   // ===== READ =====
 
   async findById(id: string, ctx: BookContext): Promise<AppointmentResponse> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, ctx);
       const row = await this.loadAppointment(manager, id);
       return toResponse(row);
     });
@@ -161,51 +183,8 @@ export class AppointmentsService {
 
   async list(query: ListAppointmentsQuery, ctx: BookContext): Promise<ListResult> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
-
-      const wheres: string[] = ['dealership_id = $1'];
-      const params: unknown[] = [ctx.dealershipId];
-
-      if (query.status) {
-        params.push(query.status);
-        wheres.push(`status = $${params.length}`);
-      }
-      if (query.technician_id) {
-        params.push(query.technician_id);
-        wheres.push(`technician_id = $${params.length}`);
-      }
-      if (query.bay_id) {
-        params.push(query.bay_id);
-        wheres.push(`bay_id = $${params.length}`);
-      }
-      if (query.customer_id) {
-        params.push(query.customer_id);
-        wheres.push(`customer_id = $${params.length}`);
-      }
-      if (query.from) {
-        params.push(query.from);
-        wheres.push(`lower(time_range) >= $${params.length}::timestamptz`);
-      }
-      if (query.to) {
-        params.push(query.to);
-        wheres.push(`lower(time_range) < $${params.length}::timestamptz`);
-      }
-      if (query.cursor) {
-        let decoded;
-        try {
-          decoded = decodeCursor(query.cursor);
-        } catch (err) {
-          throw new BadRequestException({
-            code: 'INVALID_CURSOR',
-            message: (err as Error).message,
-          });
-        }
-        params.push(decoded.t);
-        const tIdx = params.length;
-        params.push(decoded.i);
-        const iIdx = params.length;
-        wheres.push(`(lower(time_range), id) > ($${tIdx}::timestamptz, $${iIdx}::uuid)`);
-      }
+      await applyRlsContext(manager, ctx);
+      const { wheres, params } = this.buildListWhere(query, ctx);
 
       const limit = query.limit + 1;
       params.push(limit);
@@ -233,10 +212,52 @@ export class AppointmentsService {
     });
   }
 
+  private buildListWhere(
+    query: ListAppointmentsQuery,
+    ctx: BookContext,
+  ): { wheres: string[]; params: unknown[] } {
+    const wheres: string[] = ['dealership_id = $1'];
+    const params: unknown[] = [ctx.dealershipId];
+
+    const append = (sql: (idx: number) => string, value: unknown): void => {
+      params.push(value);
+      wheres.push(sql(params.length));
+    };
+
+    if (query.status) append((idx) => `status = $${idx}`, query.status);
+    if (query.technician_id) append((idx) => `technician_id = $${idx}`, query.technician_id);
+    if (query.bay_id) append((idx) => `bay_id = $${idx}`, query.bay_id);
+    if (query.customer_id) append((idx) => `customer_id = $${idx}`, query.customer_id);
+    if (query.from) append((idx) => `lower(time_range) >= $${idx}::timestamptz`, query.from);
+    if (query.to) append((idx) => `lower(time_range) < $${idx}::timestamptz`, query.to);
+
+    if (query.cursor) {
+      const decoded = this.decodeCursorOrThrow(query.cursor);
+      params.push(decoded.t);
+      const tIdx = params.length;
+      params.push(decoded.i);
+      const iIdx = params.length;
+      wheres.push(`(lower(time_range), id) > ($${tIdx}::timestamptz, $${iIdx}::uuid)`);
+    }
+
+    return { wheres, params };
+  }
+
+  private decodeCursorOrThrow(cursor: string): { t: string; i: string } {
+    try {
+      return decodeCursor(cursor);
+    } catch (err) {
+      throw new BadRequestException({
+        code: 'INVALID_CURSOR',
+        message: (err as Error).message,
+      });
+    }
+  }
+
   async history(id: string, ctx: BookContext): Promise<AppointmentHistoryRow[]> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
-      await this.loadAppointment(manager, id); // RLS check + 404
+      await applyRlsContext(manager, ctx);
+      await this.loadAppointment(manager, id);
       const rows = (await manager.query(
         `SELECT id, field, old_value, new_value, changed_by, changed_at, reason
          FROM appointment_history
@@ -273,170 +294,167 @@ export class AppointmentsService {
     ctx: BookContext,
   ): Promise<AppointmentResponse> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, ctx);
 
       const current = await this.loadAppointment(manager, id);
-      if (current.status !== 'confirmed') {
-        throw new ConflictException({
-          code: 'INVALID_STATUS_TRANSITION',
-          message: `Cannot reschedule an appointment in status ${current.status}`,
-        });
-      }
+      this.assertConfirmed(current, 'reschedule');
 
-      const sets: string[] = [];
-      const params: unknown[] = [];
-
-      // Resolve effective values after the patch
-      const effectiveTechnicianId = dto.technician_id ?? current.technician_id;
       const dealership = await this.loadDealership(manager, ctx.dealershipId);
       const service = await this.loadServiceType(manager, current.service_type_id);
-      let effectiveRange: ComputedTimeRange | null = null;
 
-      if (dto.start_at !== undefined) {
-        effectiveRange = this.buildTimeRange(dto.start_at, service, dealership.timezone);
-        params.push(effectiveRange.literal);
-        sets.push(`time_range = $${params.length}::tstzrange`);
-      }
-      if (dto.technician_id !== undefined) {
-        params.push(dto.technician_id);
-        sets.push(`technician_id = $${params.length}`);
-      }
-      if (dto.bay_id !== undefined) {
-        params.push(dto.bay_id);
-        sets.push(`bay_id = $${params.length}`);
-      }
+      const update = this.buildRescheduleUpdate(dto, service, dealership.timezone);
 
-      // If start changed OR technician changed, re-run validators against the
-      // effective values. We only have a fresh `effectiveRange` for start_at
-      // changes; for technician-only changes the existing time_range still
-      // applies, so we parse it and validate the technician's shift/skill.
       if (dto.start_at !== undefined || dto.technician_id !== undefined) {
-        const validateRange =
-          effectiveRange ??
-          (() => {
-            // current.time_range is `["2026-...","2026-...")` or with spaces — extract bounds
-            const match = current.time_range.match(/^[\[\(]"?([^",\]\)]+)"?,"?([^",\]\)]+)"?[\]\)]$/);
-            if (!match) {
-              throw new Error(`could not parse current time_range: ${current.time_range}`);
-            }
-            return {
-              literal: current.time_range,
-              startAtIso: new Date(match[1]!.replace(' ', 'T')).toISOString(),
-              endAtIso: new Date(match[2]!.replace(' ', 'T')).toISOString(),
-            } satisfies ComputedTimeRange;
-          })();
+        const validateRange = update.range ?? this.parseExistingRange(current);
         await this.runBookingValidators(
           manager,
           validateRange,
           ctx.dealershipId,
           dealership.timezone,
-          effectiveTechnicianId,
+          dto.technician_id ?? current.technician_id,
           service.required_skill_id,
         );
       }
 
-      params.push(id);
-      const idIdx = params.length;
-      params.push(expectedVersion);
-      const versionIdx = params.length;
-
-      let updated: AppointmentRow;
-      try {
-        const result = (await manager.query(
-          `UPDATE appointment
-              SET ${sets.join(', ')}
-            WHERE id = $${idIdx} AND version = $${versionIdx}
-            RETURNING *`,
-          params,
-        )) as AppointmentRow[];
-
-        if (result.length === 0) {
-          this.metrics.optimisticLockFailuresTotal.inc();
-          throw new PreconditionFailedException({
-            code: 'PRECONDITION_FAILED',
-            message: 'Appointment was modified; refresh and retry',
-            currentVersion: current.version,
-          });
-        }
-        updated = result[0]!;
-      } catch (err) {
-        if (err instanceof PreconditionFailedException) throw err;
-        throw this.translateDbError(err);
-      }
-
-      await this.recordHistory(
+      const updated = await this.applyOptimisticUpdate(
         manager,
-        updated,
-        ctx,
-        'rescheduled',
-        toResponse(current),
-        toResponse(updated),
+        id,
+        expectedVersion,
+        update.sets,
+        update.params,
+        current.version,
       );
-      await this.publishOutbox(manager, updated, ctx, 'appointment.rescheduled');
+
+      const oldResponse = toResponse(current);
+      const newResponse = toResponse(updated);
+      await this.historyRecorder.record(manager, updated, ctx, 'rescheduled', oldResponse, newResponse);
+      await this.outbox.emit(
+        manager,
+        'appointment',
+        updated.id,
+        'appointment.rescheduled',
+        newResponse,
+        ctx,
+      );
 
       this.logger.log(`appointment.rescheduled id=${id} v=${updated.version}`);
-      return toResponse(updated);
+      return newResponse;
     });
   }
 
   async cancel(id: string, expectedVersion: number, ctx: BookContext): Promise<AppointmentResponse> {
     return this.ds.transaction(async (manager) => {
-      await this.setRlsContext(manager, ctx);
+      await applyRlsContext(manager, ctx);
 
       const current = await this.loadAppointment(manager, id);
-      if (current.status !== 'confirmed') {
-        throw new ConflictException({
-          code: 'INVALID_STATUS_TRANSITION',
-          message: `Cannot cancel an appointment in status ${current.status}`,
-        });
-      }
+      this.assertConfirmed(current, 'cancel');
 
-      let updated: AppointmentRow;
-      try {
-        const result = (await manager.query(
-          `UPDATE appointment
-              SET status = 'cancelled'
-            WHERE id = $1 AND version = $2
-            RETURNING *`,
-          [id, expectedVersion],
-        )) as AppointmentRow[];
-
-        if (result.length === 0) {
-          this.metrics.optimisticLockFailuresTotal.inc();
-          throw new PreconditionFailedException({
-            code: 'PRECONDITION_FAILED',
-            message: 'Appointment was modified; refresh and retry',
-            currentVersion: current.version,
-          });
-        }
-        updated = result[0]!;
-      } catch (err) {
-        if (err instanceof PreconditionFailedException) throw err;
-        throw this.translateDbError(err);
-      }
-
-      await this.recordHistory(
+      const updated = await this.applyOptimisticUpdate(
         manager,
-        updated,
-        ctx,
-        'cancelled',
-        toResponse(current),
-        toResponse(updated),
+        id,
+        expectedVersion,
+        ["status = 'cancelled'"],
+        [],
+        current.version,
       );
-      await this.publishOutbox(manager, updated, ctx, 'appointment.cancelled');
+
+      const oldResponse = toResponse(current);
+      const newResponse = toResponse(updated);
+      await this.historyRecorder.record(manager, updated, ctx, 'cancelled', oldResponse, newResponse);
+      await this.outbox.emit(
+        manager,
+        'appointment',
+        updated.id,
+        'appointment.cancelled',
+        newResponse,
+        ctx,
+      );
 
       this.metrics.appointmentsStatusTransitionTotal
         .labels({ from: current.status, to: updated.status })
         .inc();
       this.logger.log(`appointment.cancelled id=${id}`);
-      return toResponse(updated);
+      return newResponse;
     });
   }
 
   // ===== HELPERS =====
 
-  private async setRlsContext(manager: EntityManager, ctx: BookContext): Promise<void> {
-    await applyRlsContext(manager, { dealershipId: ctx.dealershipId, userId: ctx.userId });
+  private assertConfirmed(row: AppointmentRow, action: 'reschedule' | 'cancel'): void {
+    if (row.status === 'confirmed') return;
+    throw new ConflictException({
+      code: 'INVALID_STATUS_TRANSITION',
+      message: `Cannot ${action} an appointment in status ${row.status}`,
+    });
+  }
+
+  private buildRescheduleUpdate(
+    dto: RescheduleAppointmentDto,
+    service: ServiceTypeRow,
+    timezone: string,
+  ): { sets: string[]; params: unknown[]; range: ComputedTimeRange | null } {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    let range: ComputedTimeRange | null = null;
+
+    if (dto.start_at !== undefined) {
+      range = this.buildTimeRange(dto.start_at, service, timezone);
+      params.push(range.literal);
+      sets.push(`time_range = $${params.length}::tstzrange`);
+    }
+    if (dto.technician_id !== undefined) {
+      params.push(dto.technician_id);
+      sets.push(`technician_id = $${params.length}`);
+    }
+    if (dto.bay_id !== undefined) {
+      params.push(dto.bay_id);
+      sets.push(`bay_id = $${params.length}`);
+    }
+    return { sets, params, range };
+  }
+
+  private parseExistingRange(row: AppointmentRow): ComputedTimeRange {
+    const { startAtIso, endAtIso } = parseTstzrange(row.time_range);
+    return { literal: row.time_range, startAtIso, endAtIso };
+  }
+
+  private async applyOptimisticUpdate(
+    manager: EntityManager,
+    id: string,
+    expectedVersion: number,
+    sets: string[],
+    setParams: unknown[],
+    currentVersion: number,
+  ): Promise<AppointmentRow> {
+    const params = [...setParams, id, expectedVersion];
+    const idIdx = setParams.length + 1;
+    const versionIdx = setParams.length + 2;
+
+    try {
+      // NOTE: TypeORM 0.3.x wraps UPDATE...RETURNING as [rows, rowCount] —
+      // unwrap or every field on the returned row reads as undefined.
+      const raw = await manager.query(
+        `UPDATE appointment
+            SET ${sets.join(', ')}
+          WHERE id = $${idIdx} AND version = $${versionIdx}
+          RETURNING *`,
+        params,
+      );
+      const rows = unwrapUpdateRows<AppointmentRow>(raw);
+
+      if (rows.length === 0) {
+        this.metrics.optimisticLockFailuresTotal.inc();
+        throw new PreconditionFailedException({
+          code: 'PRECONDITION_FAILED',
+          message: 'Appointment was modified; refresh and retry',
+          currentVersion,
+        });
+      }
+      return rows[0]!;
+    } catch (err) {
+      if (err instanceof PreconditionFailedException) throw err;
+      throw this.dbErrors.translate(err);
+    }
   }
 
   private async loadDealership(manager: EntityManager, id: string): Promise<DealershipRow> {
@@ -505,13 +523,9 @@ export class AppointmentsService {
       endAtIso: range.endAtIso,
     };
     try {
-      // 1. DST cross-safety (in-memory walk)
       validateRangeDoesNotCrossUnsafeDstTransition(range.startAtIso, range.endAtIso, timezone);
-      // 2. Skill match (one query, fast)
       await validateSkillMatch(ctx, technicianId, requiredSkillId);
-      // 3. Business hours / closed exception
       await validateBusinessHours(ctx);
-      // 4. Technician shift / time-off
       await validateTechnicianAvailability(ctx, technicianId);
     } catch (err) {
       if (err instanceof BookingValidationError) {
@@ -519,75 +533,6 @@ export class AppointmentsService {
       }
       throw err;
     }
-  }
-
-  private async recordHistory(
-    manager: EntityManager,
-    row: AppointmentRow,
-    ctx: BookContext,
-    field: string,
-    oldValue: unknown,
-    newValue: unknown,
-  ): Promise<void> {
-    await manager.query(
-      `INSERT INTO appointment_history
-        (appointment_id, dealership_id, field, old_value, new_value, changed_by)
-       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)`,
-      [
-        row.id,
-        ctx.dealershipId,
-        field,
-        oldValue === null ? null : JSON.stringify(oldValue),
-        JSON.stringify(newValue),
-        ctx.userId,
-      ],
-    );
-  }
-
-  private async publishOutbox(
-    manager: EntityManager,
-    row: AppointmentRow,
-    ctx: BookContext,
-    eventType: string,
-  ): Promise<void> {
-    await manager.query(
-      `INSERT INTO outbox_event
-        (dealership_id, aggregate_type, aggregate_id, event_type, payload)
-       VALUES ($1, 'appointment', $2, $3, $4::jsonb)`,
-      [ctx.dealershipId, row.id, eventType, JSON.stringify(toResponse(row))],
-    );
-  }
-
-  private translateDbError(err: unknown): Error {
-    if (!(err instanceof QueryFailedError)) return err as Error;
-    const driver = err.driverError as { code?: string; constraint?: string; detail?: string };
-    if (driver.code === '23P01') {
-      if (driver.constraint === 'appt_bay_no_overlap') {
-        this.metrics.bookingsConflictTotal.labels({ resource: 'bay' }).inc();
-        return new ConflictException({
-          code: 'BAY_UNAVAILABLE',
-          message: 'The requested bay is already booked for this time slot',
-          conflictingResource: 'bay',
-        });
-      }
-      if (driver.constraint === 'appt_technician_no_overlap') {
-        this.metrics.bookingsConflictTotal.labels({ resource: 'technician' }).inc();
-        return new ConflictException({
-          code: 'TECHNICIAN_UNAVAILABLE',
-          message: 'The technician is not available for this time slot',
-          conflictingResource: 'technician',
-        });
-      }
-      this.metrics.bookingsConflictTotal.labels({ resource: 'unknown' }).inc();
-      return new ConflictException({ code: 'BOOKING_CONFLICT' });
-    }
-    if (driver.code === '23514') {
-      return new ConflictException({
-        code: 'INVALID_STATUS_TRANSITION',
-        message: driver.detail ?? err.message,
-      });
-    }
-    return err;
   }
 }
 
@@ -606,16 +551,4 @@ function toResponse(row: AppointmentRow): AppointmentResponse {
     created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
     updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
   };
-}
-
-/**
- * Extract the lower bound of a tstzrange literal `[lower,upper)` (or `(lower,upper]`).
- * Postgres returns the literal as a string when the column is queried via raw SQL.
- */
-function extractLowerBound(timeRange: string): string {
-  const match = timeRange.match(/^[\[\(]"?([^",\]\)]+)"?,/);
-  if (!match) {
-    throw new Error(`Could not parse time_range literal: ${timeRange}`);
-  }
-  return match[1]!;
 }

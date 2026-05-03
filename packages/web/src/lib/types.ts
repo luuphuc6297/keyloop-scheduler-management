@@ -46,11 +46,15 @@ export interface ListAppointmentsResult {
   has_more: boolean;
 }
 
+export type AvailabilitySlotStatus = 'available' | 'booked';
+
 export interface AvailabilitySlot {
   start_at: string;
   end_at: string;
   technician_id: string;
   bay_id: string | null;
+  /** Present only when the request asked for `include_busy=true`. */
+  status?: AvailabilitySlotStatus;
 }
 
 export interface ServiceType {
