@@ -20,8 +20,9 @@ interface ServiceTypeRow {
 
 interface BookedRange {
   technician_id: string;
-  lower: string;
-  upper: string;
+  /** pg driver returns these as Date objects (no `::text` cast). */
+  lower: Date;
+  upper: Date;
 }
 
 interface TechnicianRow {
@@ -285,10 +286,15 @@ export class AvailabilityService {
     to: string,
   ): Promise<BookedRange[]> {
     if (technicianIds.length === 0) return [];
+    // Return raw timestamptz columns (no ::text cast). The pg driver decodes
+    // these to native JS Date objects, which `DateTime.fromJSDate` parses
+    // unambiguously. Casting to ::text would emit Postgres SQL form
+    // ("2026-07-06 13:00:00+00") that `fromISO` cannot parse — every overlap
+    // check would silently return false, leaking booked slots into responses.
     return (await manager.query(
       `SELECT technician_id,
-              lower(time_range)::text AS lower,
-              upper(time_range)::text AS upper
+              lower(time_range) AS lower,
+              upper(time_range) AS upper
          FROM appointment
         WHERE technician_id = ANY($1::uuid[])
           AND status = 'confirmed'
@@ -390,8 +396,9 @@ export class AvailabilityService {
       }
 
       const overlaps = bookings.some((b) => {
-        const bLower = DateTime.fromISO(b.lower, { setZone: true });
-        const bUpper = DateTime.fromISO(b.upper, { setZone: true });
+        // pg driver gives Date objects for tstzrange bounds — see loadBookings.
+        const bLower = DateTime.fromJSDate(b.lower);
+        const bUpper = DateTime.fromJSDate(b.upper);
         return slotStart < bUpper && slotEnd > bLower;
       });
 
